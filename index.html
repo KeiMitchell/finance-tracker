@@ -1052,22 +1052,35 @@ async function showPreview(items) {
 
 async function confirmImport() {
   const count = pendingImport.length;
+  // Clean internal properties before saving
+  const cleanItems = pendingImport.map(t => {
+    const { _confident, ...clean } = t;
+    return clean;
+  });
 
   if (currentUser) {
-    const dbRows = await bulkInsertToSupabase(pendingImport);
-    dbRows.forEach(row => {
-      transactions.push({
-        id: row.id,
-        type: row.type,
-        desc: row.description,
-        amount: parseFloat(row.amount),
-        currency: row.currency,
-        category: row.category,
-        date: row.date
+    const dbRows = await bulkInsertToSupabase(cleanItems);
+    if (dbRows.length > 0) {
+      dbRows.forEach(row => {
+        transactions.push({
+          id: row.id,
+          type: row.type,
+          desc: row.description,
+          amount: parseFloat(row.amount),
+          currency: row.currency,
+          category: row.category,
+          date: row.date
+        });
       });
-    });
+    } else {
+      // Supabase failed — save locally so data isn't lost
+      console.warn('Supabase insert failed, saving locally');
+      cleanItems.forEach(t => {
+        transactions.push({ id: Date.now() + Math.random(), ...t });
+      });
+    }
   } else {
-    pendingImport.forEach(t => {
+    cleanItems.forEach(t => {
       transactions.push({ id: Date.now() + Math.random(), ...t });
     });
   }
