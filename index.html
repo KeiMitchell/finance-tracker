@@ -926,7 +926,11 @@ async function categorizeWithGemini(items) {
   const descs = items.map((t, i) => `${i}. [${t.type}] ${t.desc} (${t.currency} ${t.amount})`).join('\n');
 
   const prompt = `Categorize these transactions. For expenses use ONLY: ${expCats}. For income use ONLY: ${incCats}.
-Reply with ONLY a JSON array of category strings, one per transaction, in the same order. No explanation.
+
+Reply with ONLY a JSON array of objects, one per transaction, in order:
+[{"category": "...", "confident": true/false}, ...]
+
+Set "confident": false if the description is ambiguous, garbled, or could fit multiple categories. Set true if obvious (e.g. SPOTIFY → Subscriptions).
 
 ${descs}`;
 
@@ -941,7 +945,12 @@ ${descs}`;
     const match = text.match(/\[[\s\S]*\]/);
     if (match) {
       const cats = JSON.parse(match[0]);
-      items.forEach((t, i) => { if (cats[i]) t.category = cats[i]; });
+      items.forEach((t, i) => {
+        if (cats[i]) {
+          t.category = cats[i].category || cats[i];
+          t._confident = typeof cats[i].confident === 'boolean' ? cats[i].confident : true;
+        }
+      });
     }
   } catch (e) {
     console.warn('Gemini categorization failed:', e);
@@ -963,35 +972,80 @@ async function showPreview(items) {
     document.getElementById('importResult').innerHTML = '';
   }
 
-  const incomeCount = items.filter(t => t.type === 'income').length;
-  const expenseCount = items.filter(t => t.type === 'expense').length;
+  const unsure = items.filter(t => t._confident === false);
+  const sure = items.filter(t => t._confident !== false);
   const preview = document.getElementById('importPreview');
   const allCats = [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES];
-  const showItems = items.slice(0, 15);
-  preview.innerHTML = `
-    <table class="preview-table">
-      <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Category</th></tr></thead>
-      <tbody>
-        ${showItems.map((t, i) => `
-          <tr>
-            <td>${t.date}</td>
-            <td>${t.desc}</td>
-            <td class="${t.type}">${t.type === 'income' ? '+' : '-'}${formatOriginal(t.amount, t.currency)}</td>
-            <td><select onchange="pendingImport[${i}].category=this.value" style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:2px 4px;font-size:12px;">
-              ${allCats.map(c => `<option value="${c}"${c === t.category ? ' selected' : ''}>${c}</option>`).join('')}
-            </select></td>
-          </tr>
-        `).join('')}
-        ${items.length > 15 ? `<tr><td colspan="4" style="color:#8b949e; text-align:center">...and ${items.length - 15} more</td></tr>` : ''}
-      </tbody>
-    </table>
-    <div style="margin-top:12px; color:#8b949e; font-size:13px">
-      Found <strong>${items.length}</strong> transactions: ${incomeCount} income, ${expenseCount} expenses
-      ${hasKey ? ' — <span style="color:#3fb950">AI categorized</span>' : ''}
-    </div>
-    <div class="preview-actions">
-      <button class="btn-import confirm" onclick="confirmImport()">Import ${items.length} transactions</button>
-      <button class="btn-import cancel" onclick="cancelImport()">Cancel</button>
+
+  let html = '';
+
+  // Auto-import confident ones immediately if there are unsure ones to review
+  if (hasKey && unsure.length > 0 && sure.length > 0) {
+    html += `<div style="margin-bottom:16px; padding:12px; background:#0f2d1a; border:1px solid #238636; border-radius:8px; font-size:13px; color:#3fb950;">
+      ${sure.length} transactions auto-categorized and ready to import
+    </div>`;
+  }
+
+  // Show unsure ones for user review
+  if (unsure.length > 0) {
+    html += `<div style="margin-bottom:8px; font-size:13px; color:#e3b341;">Please categorize these ${unsure.length} transactions:</div>`;
+    html += `<table class="preview-table"><thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Category</th></tr></thead><tbody>`;
+    unsure.forEach(t => {
+      const idx = items.indexOf(t);
+      html += `<tr style="background:#1c1a0e;">
+        <td>${t.date}</td>
+        <td>${t.desc}</td>
+        <td class="${t.type}">${t.type === 'income' ? '+' : '-'}${formatOriginal(t.amount, t.currency)}</td>
+        <td><select onchange="pendingImport[${idx}].category=this.value;pendingImport[${idx}]._confident=true" style="background:#0d1117;color:#e3b341;border:1px solid #e3b341;border-radius:4px;padding:4px 6px;font-size:12px;">
+          ${allCats.map(c => `<option value="${c}"${c === t.category ? ' selected' : ''}>${c}</option>`).join('')}
+        </select></td>
+      </tr>`;
+    });
+    html += `</tbody></table>`;
+  }
+
+  // Show confident ones as a summary
+  if (sure.length > 0) {
+    html += `<details style="margin-top:12px;"><summary style="cursor:pointer;color:#8b949e;font-size:13px;">${sure.length} auto-categorized transactions (click to review)</summary>`;
+    html += `<table class="preview-table" style="margin-top:8px;"><thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Category</th></tr></thead><tbody>`;
+    sure.forEach(t => {
+      const idx = items.indexOf(t);
+      html += `<tr>
+        <td>${t.date}</td>
+        <td>${t.desc}</td>
+        <td class="${t.type}">${t.type === 'income' ? '+' : '-'}${formatOriginal(t.amount, t.currency)}</td>
+        <td><select onchange="pendingImport[${idx}].category=this.value" style="background:#0d1117;color:#3fb950;border:1px solid #30363d;border-radius:4px;padding:2px 4px;font-size:12px;">
+          ${allCats.map(c => `<option value="${c}"${c === t.category ? ' selected' : ''}>${c}</option>`).join('')}
+        </select></td>
+      </tr>`;
+    });
+    html += `</tbody></table></details>`;
+  }
+
+  // No Gemini key — show all with dropdowns
+  if (!hasKey) {
+    const showItems = items.slice(0, 15);
+    html = `<table class="preview-table"><thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Category</th></tr></thead><tbody>
+      ${showItems.map((t, i) => `<tr>
+        <td>${t.date}</td><td>${t.desc}</td>
+        <td class="${t.type}">${t.type === 'income' ? '+' : '-'}${formatOriginal(t.amount, t.currency)}</td>
+        <td><select onchange="pendingImport[${i}].category=this.value" style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:2px 4px;font-size:12px;">
+          ${allCats.map(c => `<option value="${c}"${c === t.category ? ' selected' : ''}>${c}</option>`).join('')}
+        </select></td>
+      </tr>`).join('')}
+      ${items.length > 15 ? `<tr><td colspan="4" style="color:#8b949e;text-align:center">...and ${items.length - 15} more</td></tr>` : ''}
+    </tbody></table>`;
+  }
+
+  const total = items.length;
+  const incomeCount = items.filter(t => t.type === 'income').length;
+  const expenseCount = items.filter(t => t.type === 'expense').length;
+  html += `<div style="margin-top:12px; color:#8b949e; font-size:13px">
+    Found <strong>${total}</strong> transactions: ${incomeCount} income, ${expenseCount} expenses
+  </div>
+  <div class="preview-actions">
+    <button class="btn-import confirm" onclick="confirmImport()">Import ${total} transactions</button>
+    <button class="btn-import cancel" onclick="cancelImport()">Cancel</button>
     </div>
   `;
 }
