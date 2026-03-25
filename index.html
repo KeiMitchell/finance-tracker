@@ -1000,15 +1000,54 @@ async function recategorizeAll() {
   }
 }
 
+const LOCAL_CATEGORY_RULES = [
+  [/spotify|netflix|youtube|disney|hulu|amazon prime|apple music|newspicks|chatwork|github|figma|claude|anthropic|openai|gpt|rize|workspace|subscription/i, 'Subscriptions'],
+  [/uber eats|ubereats|doordash|grubhub|出前|デリバリー/i, 'Dining Out'],
+  [/starbucks|coffee|café|カフェ|珈琲|roastery|eatune/i, 'Dining Out'],
+  [/restaurant|レストラン|食堂|居酒屋|焼肉|寿司|ラーメン|dining|バー/i, 'Dining Out'],
+  [/suica|pasmo|jr |metro|railway|航空|airline|ana |jal |新幹線|タクシー|taxi|uber(?! eats)|バス|鉄道|交通/i, 'Transport'],
+  [/amazon(?! prime| web)|楽天市場|yahoo.*shop|mercari|メルカリ|shopping|mall|マート|百貨店|ヨドバシ|ビック/i, 'Shopping'],
+  [/スーパー|grocery|セイコーマート|ライフ|イオン|西友|成城石井|コンビニ|セブン|ファミリー|ローソン|miniストップ/i, 'Groceries'],
+  [/clinic|クリニック|hospital|病院|pharmacy|薬局|医療|dental|歯科|health/i, 'Health'],
+  [/hotel|booking\.com|airbnb|travel|旅行|航空券|expedia/i, 'Travel'],
+  [/aws|web services|heroku|vercel|gcloud|cloud/i, 'Subscriptions'],
+  [/insurance|保険/i, 'Insurance'],
+  [/school|university|大学|学校|udemy|coursera|p\.skool/i, 'Education'],
+  [/rent|家賃|管理費|housing/i, 'Rent/Housing'],
+  [/electric|gas|water|電気|ガス|水道|utility|ドコモ|softbank|au |通信/i, 'Utilities'],
+  [/gym|fitness|yoga|pilates|ジム|フィットネス/i, 'Health'],
+  [/salary|給与|給料/i, 'Salary'],
+  [/口座振替/i, 'Credit Card Payment'],
+];
+
+function categorizeLocal(item) {
+  for (const [regex, cat] of LOCAL_CATEGORY_RULES) {
+    if (regex.test(item.desc)) return cat;
+  }
+  return null;
+}
+
 async function categorizeWithGemini(items) {
+  // First pass: local rules (instant)
+  const needsAI = [];
+  items.forEach((t, i) => {
+    const local = categorizeLocal(t);
+    if (local) {
+      t.category = local;
+      t._confident = true;
+    } else {
+      needsAI.push({ item: t, idx: i });
+    }
+  });
+
   const apiKey = localStorage.getItem('finance_gemini_key');
-  if (!apiKey || items.length === 0) return items;
+  if (!apiKey || needsAI.length === 0) return items;
 
   const expCats = EXPENSE_CATEGORIES.join(', ');
   const incCats = INCOME_CATEGORIES.join(', ');
-  const descs = items.map((t, i) => `${i}. [${t.type}] ${t.desc}`).join('\n');
+  const descs = needsAI.map((e, i) => `${i}. [${e.item.type}] ${e.item.desc}`).join('\n');
 
-  const prompt = `Categorize these ${items.length} transactions. Expenses: ${expCats}. Income: ${incCats}.
+  const prompt = `Categorize these ${needsAI.length} transactions. Expenses: ${expCats}. Income: ${incCats}.
 Reply ONLY with a JSON array: [{"c":"category","ok":true/false},...]
 "ok":false if unsure.
 
@@ -1037,10 +1076,10 @@ ${descs}`;
     const match = text.match(/\[[\s\S]*\]/);
     if (match) {
       const cats = JSON.parse(match[0]);
-      items.forEach((t, i) => {
+      needsAI.forEach((e, i) => {
         if (cats[i]) {
-          t.category = cats[i].c || cats[i].category || cats[i];
-          t._confident = cats[i].ok !== undefined ? cats[i].ok : (typeof cats[i].confident === 'boolean' ? cats[i].confident : true);
+          e.item.category = cats[i].c || cats[i].category || cats[i];
+          e.item._confident = cats[i].ok !== undefined ? cats[i].ok : (typeof cats[i].confident === 'boolean' ? cats[i].confident : true);
         }
       });
     } else {
