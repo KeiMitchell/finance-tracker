@@ -793,7 +793,7 @@ function parseAmex(lines) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     // Japanese AMEX header detection
-    if (line.includes('利用日') && line.includes('金額')) {
+    if (line.includes('利用') && line.includes('金額')) {
       headerIdx = i;
       isJapanese = true;
       colMap = { date: 0, desc: 2, amount: 3, foreignAmount: 4, rate: 5 };
