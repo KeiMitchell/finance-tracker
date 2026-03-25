@@ -273,12 +273,13 @@
   <div class="transactions">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
       <h2 style="margin:0">Transactions</h2>
-      <div class="filter-bar" style="margin:0">
+      <div class="filter-bar" style="margin:0; display:flex; gap:8px; align-items:center;">
         <select id="filterType" onchange="render()">
           <option value="all">All</option>
           <option value="income">Income</option>
           <option value="expense">Expense</option>
         </select>
+        <button id="recategorizeBtn" onclick="recategorizeAll()" style="padding:6px 12px; background:#1f6feb; border:none; border-radius:6px; color:#fff; font-size:12px; cursor:pointer; display:none;">AI Categorize</button>
       </div>
     </div>
     <div class="tx-list" id="txList"></div>
@@ -917,11 +918,41 @@ function saveGeminiKey() {
 function updateGeminiStatus() {
   const el = document.getElementById('geminiStatus');
   if (!el) return;
-  if (localStorage.getItem('finance_gemini_key')) {
-    el.innerHTML = '<span style="color:#3fb950;">Key saved</span>';
-  } else {
-    el.innerHTML = '';
+  const hasKey = !!localStorage.getItem('finance_gemini_key');
+  el.innerHTML = hasKey ? '<span style="color:#3fb950;">Key saved</span>' : '';
+  const btn = document.getElementById('recategorizeBtn');
+  if (btn) btn.style.display = hasKey ? 'inline-block' : 'none';
+}
+
+async function recategorizeAll() {
+  const apiKey = localStorage.getItem('finance_gemini_key');
+  if (!apiKey) return alert('Save a Gemini API key first.');
+
+  const btn = document.getElementById('recategorizeBtn');
+  btn.textContent = 'Categorizing...';
+  btn.disabled = true;
+
+  const uncategorized = transactions.filter(t => t.category === 'Other' || t.category === 'Other Income');
+  if (uncategorized.length === 0) {
+    btn.textContent = 'AI Categorize';
+    btn.disabled = false;
+    return alert('No uncategorized transactions.');
   }
+
+  await categorizeWithGemini(uncategorized);
+  // Clean _confident from transactions
+  uncategorized.forEach(t => delete t._confident);
+
+  saveLocal();
+  if (currentUser) {
+    // Update categories in Supabase
+    for (const t of uncategorized) {
+      await sb.from('transactions').update({ category: t.category }).eq('id', t.id);
+    }
+  }
+  render();
+  btn.textContent = 'AI Categorize';
+  btn.disabled = false;
 }
 
 async function categorizeWithGemini(items) {
@@ -1066,7 +1097,9 @@ async function showPreview(items) {
 }
 
 async function confirmImport() {
+  try {
   const count = pendingImport.length;
+  if (count === 0) return;
   // Clean internal properties before saving
   const cleanItems = pendingImport.map(t => {
     const { _confident, ...clean } = t;
@@ -1106,6 +1139,9 @@ async function confirmImport() {
   document.getElementById('csvFile').value = '';
   render();
   showImportResult(`Successfully imported ${count} transactions.`, 'success');
+  } catch (err) {
+    showImportResult('Import error: ' + err.message, 'error');
+  }
 }
 
 function cancelImport() {
