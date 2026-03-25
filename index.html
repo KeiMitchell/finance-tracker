@@ -1040,7 +1040,7 @@ const LOCAL_CATEGORY_RULES = [
   [/restaurant|レストラン|食堂|居酒屋|焼肉|寿司|すし|ラーメン|そば|うどん|丼|定食|弁当/i, 'Dining Out'],
   [/dining|バー|bar |izakaya|焼鳥|串|鳥|牛|豚|魚|鮨|天ぷら|tempura/i, 'Dining Out'],
   [/マクドナルド|mcdonald|mos burger|モスバーガー|吉野家|松屋|すき家|なか卯|coco壱/i, 'Dining Out'],
-  [/eatune|yukinoshita/i, 'Dining Out'],
+  [/eatune|yukinoshita|bills(?!.*payment)/i, 'Dining Out'],
   [/ノート\s.*\s.*田/i, 'Dining Out'],
 
   // --- Groceries ---
