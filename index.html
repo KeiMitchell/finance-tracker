@@ -138,6 +138,28 @@
   .import-result { margin-top: 12px; padding: 10px 14px; border-radius: 8px; font-size: 13px; }
   .import-result.success { background: #0f2d1a; color: #3fb950; }
   .import-result.error { background: #2d1117; color: #f85149; }
+
+  /* Subscriptions */
+  .sub-section { margin-top: 24px; background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px; }
+  .sub-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .sub-form input, .sub-form select { padding: 10px 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; color: #e1e4e8; font-size: 13px; }
+  .sub-form input:focus, .sub-form select:focus { border-color: #58a6ff; outline: none; }
+  .btn-add-sub { padding: 10px 20px; background: #8b5cf6; color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .btn-add-sub:hover { background: #7c3aed; }
+  .sub-list { display: flex; flex-direction: column; gap: 8px; }
+  .sub-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: #0d1117; border: 1px solid #21262d; border-radius: 10px; }
+  .sub-item-left { display: flex; align-items: center; gap: 12px; }
+  .sub-name { font-size: 14px; font-weight: 500; }
+  .sub-cycle { font-size: 12px; color: #8b949e; }
+  .sub-amount { font-size: 15px; font-weight: 600; color: #bc8cff; }
+  .sub-monthly { font-size: 12px; color: #8b949e; }
+  .sub-next { font-size: 12px; color: #8b949e; }
+  .sub-delete { background: none; border: none; color: #484f58; cursor: pointer; font-size: 14px; padding: 4px; margin-left: 12px; }
+  .sub-delete:hover { color: #f85149; }
+  .sub-total { margin-top: 12px; padding: 12px 16px; background: #1c1437; border: 1px solid #30365d; border-radius: 10px; display: flex; justify-content: space-between; align-items: center; }
+  .sub-total-label { font-size: 14px; color: #8b949e; }
+  .sub-total-value { font-size: 20px; font-weight: 700; color: #bc8cff; }
+  .card-value.subs { color: #bc8cff; }
 </style>
 </head>
 <body>
@@ -231,6 +253,36 @@
       </div>
     </div>
     <div class="tx-list" id="txList"></div>
+  </div>
+
+  <div class="sub-section">
+    <h2>Subscriptions</h2>
+    <div class="sub-form">
+      <input type="text" id="subName" placeholder="Service name (e.g. Netflix)">
+      <input type="number" id="subAmount" placeholder="Amount" min="0" step="0.01">
+      <select id="subCurrency"><option value="JPY">JPY</option><option value="USD">USD</option></select>
+      <select id="subCycle">
+        <option value="monthly">Monthly</option>
+        <option value="yearly">Yearly</option>
+        <option value="weekly">Weekly</option>
+      </select>
+      <select id="subCategory">
+        <option value="Streaming">Streaming</option>
+        <option value="Music">Music</option>
+        <option value="Cloud Storage">Cloud Storage</option>
+        <option value="Software">Software</option>
+        <option value="Gaming">Gaming</option>
+        <option value="News/Media">News/Media</option>
+        <option value="Fitness">Fitness</option>
+        <option value="Insurance">Insurance</option>
+        <option value="Phone/Internet">Phone/Internet</option>
+        <option value="Other">Other</option>
+      </select>
+      <input type="date" id="subNextDate">
+      <button class="btn-add-sub" onclick="addSubscription()">+ Add</button>
+    </div>
+    <div class="sub-list" id="subList"></div>
+    <div class="sub-total" id="subTotal"></div>
   </div>
 
   <div class="import-section">
@@ -354,7 +406,7 @@ function saveLocal() { localStorage.setItem('finance_tx', JSON.stringify(transac
 
 // --- Supabase Data Sync ---
 async function loadFromSupabase() {
-  const { data, error } = await supabase
+  const { data, error } = await sb
     .from('transactions')
     .select('*')
     .eq('user_id', currentUser.id)
@@ -486,6 +538,7 @@ function render() {
     <div class="card"><div class="card-label">Expenses</div><div class="card-value expense">${formatJPY(totalExpense)}</div><div class="card-sub">This month (JPY)</div></div>
     <div class="card"><div class="card-label">Net Cash Flow</div><div class="card-value net">${formatJPY(net)}</div><div class="card-sub">${net >= 0 ? 'Surplus' : 'Deficit'}</div></div>
     <div class="card"><div class="card-label">Savings Rate</div><div class="card-value net">${savingsRate}%</div><div class="card-sub">of income saved</div></div>
+    <div class="card"><div class="card-label">Subscriptions</div><div class="card-value subs">${formatJPY(subscriptions.reduce((s, sub) => s + getMonthlyAmount(sub), 0))}</div><div class="card-sub">per month</div></div>
   `;
 
   // Transactions list
@@ -769,6 +822,79 @@ function showImportResult(msg, type) {
   setTimeout(() => { document.getElementById('importResult').innerHTML = ''; }, 5000);
 }
 
+// --- Subscriptions ---
+let subscriptions = JSON.parse(localStorage.getItem('finance_subs') || '[]');
+
+function saveSubs() { localStorage.setItem('finance_subs', JSON.stringify(subscriptions)); }
+
+function getMonthlyAmount(sub) {
+  const amt = toJPY(sub.amount, sub.currency || 'JPY');
+  if (sub.cycle === 'yearly') return amt / 12;
+  if (sub.cycle === 'weekly') return amt * (52 / 12);
+  return amt;
+}
+
+function addSubscription() {
+  const name = document.getElementById('subName').value.trim();
+  const amount = parseFloat(document.getElementById('subAmount').value);
+  const currency = document.getElementById('subCurrency').value;
+  const cycle = document.getElementById('subCycle').value;
+  const category = document.getElementById('subCategory').value;
+  const nextDate = document.getElementById('subNextDate').value;
+  if (!name || !amount) return alert('Please enter a name and amount');
+
+  subscriptions.push({ id: Date.now(), name, amount, currency, cycle, category, nextDate });
+  saveSubs();
+  document.getElementById('subName').value = '';
+  document.getElementById('subAmount').value = '';
+  renderSubs();
+}
+
+function deleteSubscription(id) {
+  subscriptions = subscriptions.filter(s => s.id !== id);
+  saveSubs();
+  renderSubs();
+}
+
+function renderSubs() {
+  const list = document.getElementById('subList');
+  if (subscriptions.length === 0) {
+    list.innerHTML = '<div class="empty">No subscriptions yet. Add one above!</div>';
+    document.getElementById('subTotal').style.display = 'none';
+    return;
+  }
+  document.getElementById('subTotal').style.display = 'flex';
+
+  const cycleLabel = { monthly: '/mo', yearly: '/yr', weekly: '/wk' };
+  list.innerHTML = subscriptions.map(s => {
+    const monthly = getMonthlyAmount(s);
+    const cur = s.currency || 'JPY';
+    return `
+    <div class="sub-item">
+      <div class="sub-item-left">
+        <div>
+          <div class="sub-name">${s.name}</div>
+          <div class="sub-cycle">${s.category} &middot; ${s.cycle}${s.nextDate ? ' &middot; Next: ' + s.nextDate : ''}</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center">
+        <div style="text-align:right">
+          <div class="sub-amount">${formatOriginal(s.amount, cur)}${cycleLabel[s.cycle]}</div>
+          <div class="sub-monthly">${formatJPY(monthly)}/mo</div>
+        </div>
+        <button class="sub-delete" onclick="deleteSubscription(${s.id})" title="Delete">&times;</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  const totalMonthly = subscriptions.reduce((sum, s) => sum + getMonthlyAmount(s), 0);
+  const totalYearly = totalMonthly * 12;
+  document.getElementById('subTotal').innerHTML = `
+    <div class="sub-total-label">Monthly total: <strong>${formatJPY(totalMonthly)}</strong></div>
+    <div class="sub-total-value">${formatJPY(totalYearly)}/yr</div>
+  `;
+}
+
 // Fetch live USD/JPY rate
 async function fetchLiveRate() {
   const status = document.getElementById('rateStatus');
@@ -793,6 +919,7 @@ async function fetchLiveRate() {
 document.getElementById('date').value = new Date().toISOString().split('T')[0];
 setType('income');
 render();
+renderSubs();
 fetchLiveRate();
 </script>
 </body>
