@@ -917,12 +917,27 @@ function splitCSVLine(line) {
   return result;
 }
 
-function saveGeminiKey() {
+async function saveGeminiKey() {
   const key = document.getElementById('geminiKey').value.trim();
-  if (key) {
+  if (!key) return;
+  const el = document.getElementById('geminiStatus');
+  el.innerHTML = '<span style="color:#e3b341;">Testing...</span>';
+  try {
+    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: 'Reply with just: ok' }] }] })
+    });
+    if (!resp.ok) {
+      const err = await resp.text();
+      el.innerHTML = `<span style="color:#f85149;">Invalid key: ${resp.status}</span>`;
+      return;
+    }
     localStorage.setItem('finance_gemini_key', key);
     document.getElementById('geminiKey').value = '';
     updateGeminiStatus();
+  } catch (e) {
+    el.innerHTML = `<span style="color:#f85149;">Error: ${e.message}</span>`;
   }
 }
 function updateGeminiStatus() {
@@ -1021,10 +1036,15 @@ async function showPreview(items) {
 
   // Auto-categorize if Gemini key is set
   const hasKey = !!localStorage.getItem('finance_gemini_key');
+  let geminiWorked = false;
   if (hasKey) {
     showImportResult('Categorizing transactions with AI...', 'success');
     await categorizeWithGemini(items);
-    document.getElementById('importResult').innerHTML = '';
+    geminiWorked = items.some(t => t._confident !== undefined);
+    if (geminiWorked) {
+      document.getElementById('importResult').innerHTML = '';
+    }
+    // If not geminiWorked, error message from categorizeWithGemini stays visible
   }
 
   const unsure = items.filter(t => t._confident === false);
