@@ -690,30 +690,48 @@ dropZone.addEventListener('drop', e => {
 });
 
 function handleCSVFile(file) {
-  const reader = new FileReader();
-  reader.onload = e => {
-    const bank = document.getElementById('bankSelect').value;
+  // Try Shift_JIS first (works for Japanese CSVs and ASCII-only files), fall back to UTF-8
+  const reader1 = new FileReader();
+  reader1.onload = e => {
     try {
-      pendingImport = parseCSV(e.target.result, bank);
-      showPreview(pendingImport);
-    } catch (err) {
-      showImportResult('Error parsing CSV: ' + err.message, 'error');
-    }
+      const text = e.target.result;
+      pendingImport = parseCSVAuto(text);
+      if (pendingImport.length > 0) { showPreview(pendingImport); return; }
+    } catch (err) { /* try UTF-8 */ }
+    // Fallback: re-read as UTF-8
+    const reader2 = new FileReader();
+    reader2.onload = e2 => {
+      try {
+        pendingImport = parseCSVAuto(e2.target.result);
+        showPreview(pendingImport);
+      } catch (err) {
+        showImportResult('Error parsing CSV: ' + err.message, 'error');
+      }
+    };
+    reader2.readAsText(file, 'UTF-8');
   };
-  const bank = document.getElementById('bankSelect').value;
-  if (bank === 'rakuten' || bank === 'amex') {
-    reader.readAsText(file, 'Shift_JIS');
-  } else {
-    reader.readAsText(file, 'UTF-8');
-  }
+  reader1.readAsText(file, 'Shift_JIS');
 }
 
-function parseCSV(text, bank) {
+function parseCSVAuto(text) {
   const lines = text.trim().split('\n').map(l => l.trim()).filter(l => l);
-  if (bank === 'rakuten') return parseRakuten(lines);
-  if (bank === 'sofi') return parseSoFi(lines);
-  if (bank === 'amex') return parseAmex(lines);
-  return parseGeneric(lines);
+  // Auto-detect format from content
+  for (let i = 0; i < Math.min(lines.length, 5); i++) {
+    const cols = splitCSVLine(lines[i]);
+    const first = cols[0]?.trim() || '';
+    // AMEX Japan: first data col is YYYY/MM/DD, 4+ columns
+    if (first.match(/^\d{4}\/\d{2}\/\d{2}$/) && cols.length >= 4) return parseAmex(lines);
+    // Rakuten: first col is YYYYMMDD (8 digits)
+    if (/^\d{8}$/.test(first)) return parseRakuten(lines);
+    // SoFi/Generic: header with Date, Description, Amount
+    const lower = lines[i].toLowerCase();
+    if (lower.includes('date') && lower.includes('description') && lower.includes('amount')) return parseSoFi(lines);
+  }
+  // Last resort: try each parser
+  for (const parser of [parseAmex, parseSoFi, parseRakuten]) {
+    try { const r = parser(lines); if (r.length > 0) return r; } catch(e) {}
+  }
+  throw new Error('Could not detect CSV format. Please check your file.');
 }
 
 function parseRakuten(lines) {
