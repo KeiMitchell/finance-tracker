@@ -334,13 +334,14 @@
         <select id="bankSelect">
           <option value="rakuten">Rakuten Bank</option>
           <option value="sofi">SoFi</option>
+          <option value="amex">AMEX</option>
           <option value="generic">Generic CSV</option>
         </select>
       </div>
     </div>
     <div class="drop-zone" id="dropZone" onclick="document.getElementById('csvFile').click()">
       <p>Drop your CSV file here or click to browse</p>
-      <small>Supports Rakuten Bank &amp; SoFi statement exports</small>
+      <small>Supports Rakuten Bank, SoFi &amp; AMEX statement exports</small>
     </div>
     <input type="file" id="csvFile" accept=".csv" style="display:none" onchange="handleCSVFile(this.files[0])">
     <div id="importPreview"></div>
@@ -711,6 +712,7 @@ function parseCSV(text, bank) {
   const lines = text.trim().split('\n').map(l => l.trim()).filter(l => l);
   if (bank === 'rakuten') return parseRakuten(lines);
   if (bank === 'sofi') return parseSoFi(lines);
+  if (bank === 'amex') return parseAmex(lines);
   return parseGeneric(lines);
 }
 
@@ -776,6 +778,66 @@ function parseSoFi(lines) {
       type: rawAmount > 0 ? 'income' : 'expense',
       currency: 'USD',
       category: rawAmount > 0 ? 'Other Income' : 'Other'
+    });
+  }
+  return results;
+}
+
+function parseAmex(lines) {
+  // AMEX CSV: Date, Description, Amount (positive=charge, negative=credit/payment)
+  // May also have: Date, Reference, Amount, Description or other variations
+  const results = [];
+  let headerIdx = -1;
+  let colMap = {};
+  for (let i = 0; i < lines.length; i++) {
+    const lower = lines[i].toLowerCase();
+    if (lower.includes('date') && lower.includes('amount')) {
+      headerIdx = i;
+      const headers = splitCSVLine(lines[i]).map(h => h.toLowerCase().trim());
+      headers.forEach((h, j) => {
+        if (h === 'date') colMap.date = j;
+        if (h.includes('description') || h === 'payee') colMap.desc = j;
+        if (h === 'amount') colMap.amount = j;
+        if (h === 'category') colMap.category = j;
+      });
+      // If no description column found, try second column
+      if (colMap.desc === undefined) colMap.desc = 1;
+      break;
+    }
+  }
+  // If no header found, assume headerless AMEX format: Date, Description, Amount
+  const startIdx = headerIdx === -1 ? 0 : headerIdx + 1;
+  if (headerIdx === -1) {
+    colMap = { date: 0, desc: 1, amount: 2 };
+  }
+  for (let i = startIdx; i < lines.length; i++) {
+    const cols = splitCSVLine(lines[i]);
+    if (cols.length < 3) continue;
+    const rawDate = cols[colMap.date]?.trim();
+    if (!rawDate) continue;
+    let date;
+    if (rawDate.includes('/')) {
+      const parts = rawDate.split('/');
+      if (parts[2]?.length === 4) {
+        date = parts[2] + '-' + parts[0].padStart(2,'0') + '-' + parts[1].padStart(2,'0');
+      } else if (parts[2]?.length === 2) {
+        date = '20' + parts[2] + '-' + parts[0].padStart(2,'0') + '-' + parts[1].padStart(2,'0');
+      } else {
+        date = rawDate;
+      }
+    } else {
+      date = rawDate;
+    }
+    const rawAmount = parseFloat(cols[colMap.amount]?.replace(/[$,]/g, '').trim());
+    if (isNaN(rawAmount) || rawAmount === 0) continue;
+    const desc = cols[colMap.desc]?.trim() || 'AMEX Transaction';
+    // AMEX: positive = charge (expense), negative = payment/credit (income/refund)
+    results.push({
+      date, desc,
+      amount: Math.abs(rawAmount),
+      type: rawAmount > 0 ? 'expense' : 'income',
+      currency: 'USD',
+      category: rawAmount > 0 ? 'Other' : 'Refund'
     });
   }
   return results;
