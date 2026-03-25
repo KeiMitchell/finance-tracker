@@ -273,7 +273,7 @@ async function loginWithGoogle() {
   try {
     const { error } = await sb.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: window.location.href }
+      options: { redirectTo: 'https://keimitchell.github.io/finance-tracker/' }
     });
     if (error) showAuthError(error.message);
   } catch (e) {
