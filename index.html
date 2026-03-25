@@ -970,34 +970,42 @@ function updateGeminiStatus() {
 }
 
 async function recategorizeAll() {
-  const apiKey = localStorage.getItem('finance_gemini_key');
-  if (!apiKey) return alert('Save a Gemini API key first.');
-
   const btn = document.getElementById('recategorizeBtn');
-  btn.textContent = 'Categorizing...';
-  btn.disabled = true;
 
+  // Step 1: Apply local rules instantly
   const uncategorized = transactions.filter(t => t.category === 'Other' || t.category === 'Other Income');
-  if (uncategorized.length === 0) {
-    btn.textContent = 'AI Categorize';
-    btn.disabled = false;
-    return alert('No uncategorized transactions.');
-  }
+  if (uncategorized.length === 0) return alert('No uncategorized transactions.');
 
-  await categorizeWithGemini(uncategorized);
-  uncategorized.forEach(t => delete t._confident);
+  let localFixed = 0;
+  uncategorized.forEach(t => {
+    const cat = categorizeLocal(t);
+    if (cat) { t.category = cat; localFixed++; }
+  });
 
+  // Save & render immediately with local results
   saveLocal();
   render();
-  btn.textContent = 'AI Categorize';
-  btn.disabled = false;
 
-  // Sync to Supabase in background (non-blocking)
-  if (currentUser) {
-    Promise.all(uncategorized.map(t =>
-      sb.from('transactions').update({ category: t.category }).eq('id', t.id)
-    )).catch(e => console.warn('Supabase sync failed:', e));
+  const stillOther = transactions.filter(t => t.category === 'Other' || t.category === 'Other Income');
+
+  if (localFixed > 0) {
+    alert(`Categorized ${localFixed} transactions instantly.${stillOther.length > 0 ? ` ${stillOther.length} remaining — running AI in background.` : ''}`);
   }
+
+  // Step 2: Run Gemini in background for remaining
+  const apiKey = localStorage.getItem('finance_gemini_key');
+  if (!apiKey || stillOther.length === 0) return;
+
+  btn.textContent = `AI (${stillOther.length})...`;
+  btn.disabled = true;
+
+  categorizeWithGemini(stillOther).then(() => {
+    stillOther.forEach(t => delete t._confident);
+    saveLocal();
+    render();
+    btn.textContent = 'AI Categorize';
+    btn.disabled = false;
+  });
 }
 
 const LOCAL_CATEGORY_RULES = [
