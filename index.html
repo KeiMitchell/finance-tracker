@@ -703,18 +703,18 @@ dropZone.addEventListener('drop', e => {
 function handleCSVFile(file) {
   // Try Shift_JIS first (works for Japanese CSVs and ASCII-only files), fall back to UTF-8
   const reader1 = new FileReader();
-  reader1.onload = e => {
+  reader1.onload = async e => {
     try {
       const text = e.target.result;
       pendingImport = parseCSVAuto(text);
-      if (pendingImport.length > 0) { showPreview(pendingImport); return; }
+      if (pendingImport.length > 0) { await showPreview(pendingImport); return; }
     } catch (err) { /* try UTF-8 */ }
     // Fallback: re-read as UTF-8
     const reader2 = new FileReader();
-    reader2.onload = e2 => {
+    reader2.onload = async e2 => {
       try {
         pendingImport = parseCSVAuto(e2.target.result);
-        showPreview(pendingImport);
+        await showPreview(pendingImport);
       } catch (err) {
         showImportResult('Error parsing CSV: ' + err.message, 'error');
       }
@@ -1048,6 +1048,7 @@ async function showPreview(items) {
     <button class="btn-import cancel" onclick="cancelImport()">Cancel</button>
     </div>
   `;
+  preview.innerHTML = html;
 }
 
 async function confirmImport() {
