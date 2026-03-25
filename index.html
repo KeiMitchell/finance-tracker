@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Personal Finance Tracker</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1117; color: #e1e4e8; min-height: 100vh; }
+
+  .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 28px; font-weight: 700; margin-bottom: 24px; color: #fff; }
+  h2 { font-size: 18px; font-weight: 600; margin-bottom: 16px; color: #c9d1d9; }
+
+  /* Summary Cards */
+  .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px; }
+  .card-label { font-size: 13px; color: #8b949e; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .card-value { font-size: 28px; font-weight: 700; }
+  .card-value.income { color: #3fb950; }
+  .card-value.expense { color: #f85149; }
+  .card-value.net { color: #58a6ff; }
+  .card-sub { font-size: 12px; color: #8b949e; margin-top: 4px; }
+
+  /* Layout */
+  .main-grid { display: grid; grid-template-columns: 360px 1fr; gap: 24px; }
+  @media (max-width: 800px) { .main-grid { grid-template-columns: 1fr; } }
+
+  /* Form */
+  .form-section { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px; height: fit-content; }
+  .tab-bar { display: flex; gap: 4px; margin-bottom: 16px; background: #0d1117; border-radius: 8px; padding: 4px; }
+  .tab { flex: 1; padding: 8px; text-align: center; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; border: none; color: #8b949e; background: transparent; transition: all 0.2s; }
+  .tab.active-income { background: #0f2d1a; color: #3fb950; }
+  .tab.active-expense { background: #2d1117; color: #f85149; }
+
+  .form-group { margin-bottom: 14px; }
+  .form-group label { display: block; font-size: 13px; color: #8b949e; margin-bottom: 6px; }
+  .form-group input, .form-group select { width: 100%; padding: 10px 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; color: #e1e4e8; font-size: 14px; outline: none; }
+  .form-group input:focus, .form-group select:focus { border-color: #58a6ff; }
+
+  .btn-add { width: 100%; padding: 12px; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .btn-add.income { background: #238636; color: #fff; }
+  .btn-add.income:hover { background: #2ea043; }
+  .btn-add.expense { background: #da3633; color: #fff; }
+  .btn-add.expense:hover { background: #f85149; }
+
+  /* Charts */
+  .charts-section { display: flex; flex-direction: column; gap: 20px; }
+  .chart-card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px; }
+  .chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 800px) { .chart-row { grid-template-columns: 1fr; } }
+  canvas { max-height: 280px; }
+
+  /* Transactions */
+  .transactions { margin-top: 24px; background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px; }
+  .filter-bar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+  .filter-bar select, .filter-bar input { padding: 8px 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; color: #e1e4e8; font-size: 13px; }
+  .tx-list { max-height: 400px; overflow-y: auto; }
+  .tx-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #21262d; }
+  .tx-item:last-child { border-bottom: none; }
+  .tx-left { display: flex; align-items: center; gap: 12px; }
+  .tx-icon { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+  .tx-icon.income { background: #0f2d1a; }
+  .tx-icon.expense { background: #2d1117; }
+  .tx-desc { font-size: 14px; font-weight: 500; }
+  .tx-cat { font-size: 12px; color: #8b949e; }
+  .tx-right { text-align: right; }
+  .tx-amount { font-size: 15px; font-weight: 600; }
+  .tx-amount.income { color: #3fb950; }
+  .tx-amount.expense { color: #f85149; }
+  .tx-date { font-size: 12px; color: #8b949e; }
+  .tx-delete { background: none; border: none; color: #484f58; cursor: pointer; font-size: 14px; margin-left: 12px; padding: 4px; }
+  .tx-delete:hover { color: #f85149; }
+
+  .empty { text-align: center; padding: 40px; color: #484f58; font-size: 14px; }
+
+  /* Month selector */
+  .month-nav { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+  .month-nav button { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; padding: 6px 14px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+  .month-nav button:hover { background: #30363d; }
+  .month-nav span { font-size: 16px; font-weight: 600; color: #fff; min-width: 160px; text-align: center; }
+
+  /* Exchange rate bar */
+  .rate-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 12px 16px; flex-wrap: wrap; }
+  .rate-bar label { font-size: 13px; color: #8b949e; }
+  .rate-bar input { width: 100px; padding: 6px 10px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e1e4e8; font-size: 14px; text-align: right; }
+  .rate-bar input:focus { border-color: #58a6ff; outline: none; }
+  .rate-bar .rate-hint { font-size: 12px; color: #484f58; }
+  .rate-status { font-size: 12px; padding: 2px 8px; border-radius: 4px; }
+  .rate-status.live { color: #3fb950; background: #0f2d1a; }
+  .rate-status.manual { color: #e3b341; background: #2d2a11; }
+  .rate-status.error { color: #f85149; background: #2d1117; }
+
+  /* Currency selector inline with amount */
+  .amount-row { display: flex; gap: 8px; }
+  .amount-row input { flex: 1; }
+  .amount-row select { width: 80px; padding: 10px 8px; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; color: #e1e4e8; font-size: 14px; }
+
+  .tx-currency { font-size: 11px; color: #8b949e; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Finance Tracker</h1>
+
+  <div class="month-nav">
+    <button onclick="changeMonth(-1)">&larr; Prev</button>
+    <span id="monthLabel"></span>
+    <button onclick="changeMonth(1)">Next &rarr;</button>
+  </div>
+
+  <div class="rate-bar">
+    <label>USD/JPY Rate:</label>
+    <input type="number" id="exchangeRate" step="0.01" onchange="saveRate(); render();">
+    <span class="rate-status" id="rateStatus"></span>
+    <span class="rate-hint">All summaries & charts shown in JPY</span>
+  </div>
+
+  <div class="summary" id="summary"></div>
+
+  <div class="main-grid">
+    <div class="form-section">
+      <h2>Add Transaction</h2>
+      <div class="tab-bar">
+        <button class="tab active-income" id="tabIncome" onclick="setType('income')">Income</button>
+        <button class="tab" id="tabExpense" onclick="setType('expense')">Expense</button>
+      </div>
+      <div class="form-group">
+        <label>Description</label>
+        <input type="text" id="desc" placeholder="e.g. Salary, Groceries">
+      </div>
+      <div class="form-group">
+        <label>Amount</label>
+        <div class="amount-row">
+          <input type="number" id="amount" placeholder="0" min="0" step="0.01">
+          <select id="currency">
+            <option value="JPY">JPY</option>
+            <option value="USD">USD</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Category</label>
+        <select id="category"></select>
+      </div>
+      <div class="form-group">
+        <label>Date</label>
+        <input type="date" id="date">
+      </div>
+      <button class="btn-add income" id="btnAdd" onclick="addTransaction()">+ Add Income</button>
+    </div>
+
+    <div class="charts-section">
+      <div class="chart-card">
+        <h2>Monthly Cash Flow</h2>
+        <canvas id="cashflowChart"></canvas>
+      </div>
+      <div class="chart-row">
+        <div class="chart-card">
+          <h2>Spending by Category</h2>
+          <canvas id="categoryChart"></canvas>
+        </div>
+        <div class="chart-card">
+          <h2>Income vs Expenses</h2>
+          <canvas id="pieChart"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="transactions">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
+      <h2 style="margin:0">Transactions</h2>
+      <div class="filter-bar" style="margin:0">
+        <select id="filterType" onchange="render()">
+          <option value="all">All</option>
+          <option value="income">Income</option>
+          <option value="expense">Expense</option>
+        </select>
+      </div>
+    </div>
+    <div class="tx-list" id="txList"></div>
+  </div>
+</div>
+
+<script>
+const INCOME_CATEGORIES = ['Salary', 'Freelance', 'Investment', 'Side Hustle', 'Gift', 'Refund', 'Other Income'];
+const EXPENSE_CATEGORIES = ['Rent/Housing', 'Groceries', 'Dining Out', 'Transport', 'Utilities', 'Subscriptions', 'Shopping', 'Entertainment', 'Health', 'Insurance', 'Education', 'Travel', 'Gifts', 'Savings', 'Other'];
+const CATEGORY_ICONS = {
+  'Salary': '💰', 'Freelance': '💻', 'Investment': '📈', 'Side Hustle': '🔧', 'Gift': '🎁', 'Refund': '↩️', 'Other Income': '💵',
+  'Rent/Housing': '🏠', 'Groceries': '🛒', 'Dining Out': '🍽️', 'Transport': '🚗', 'Utilities': '⚡', 'Subscriptions': '📱',
+  'Shopping': '🛍️', 'Entertainment': '🎬', 'Health': '💊', 'Insurance': '🛡️', 'Education': '📚', 'Travel': '✈️',
+  'Gifts': '🎁', 'Savings': '🏦', 'Other': '📌'
+};
+const CATEGORY_COLORS = ['#58a6ff','#3fb950','#f0883e','#bc8cff','#f85149','#39d2c0','#db61a2','#e3b341','#8b949e','#79c0ff','#56d364','#d2a8ff','#ff7b72','#a5d6ff','#7ee787'];
+
+let transactions = JSON.parse(localStorage.getItem('finance_tx') || '[]');
+let currentType = 'income';
+let viewDate = new Date();
+
+function getRate() { return parseFloat(localStorage.getItem('finance_usd_jpy') || '150'); }
+function saveRate() { localStorage.setItem('finance_usd_jpy', document.getElementById('exchangeRate').value); }
+function toJPY(amount, currency) { return currency === 'USD' ? amount * getRate() : amount; }
+
+function formatJPY(n) {
+  return new Intl.NumberFormat('ja-JP', { style: 'currency', currency: 'JPY', maximumFractionDigits: 0 }).format(Math.round(n));
+}
+function formatOriginal(amount, currency) {
+  if (currency === 'USD') return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+  return new Intl.NumberFormat('ja-JP', { style: 'currency', currency: 'JPY', maximumFractionDigits: 0 }).format(amount);
+}
+
+function save() { localStorage.setItem('finance_tx', JSON.stringify(transactions)); }
+
+function setType(type) {
+  currentType = type;
+  const catSelect = document.getElementById('category');
+  const cats = type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+  catSelect.innerHTML = cats.map(c => `<option value="${c}">${c}</option>`).join('');
+  document.getElementById('tabIncome').className = type === 'income' ? 'tab active-income' : 'tab';
+  document.getElementById('tabExpense').className = type === 'expense' ? 'tab active-expense' : 'tab';
+  const btn = document.getElementById('btnAdd');
+  btn.className = 'btn-add ' + type;
+  btn.textContent = type === 'income' ? '+ Add Income' : '+ Add Expense';
+}
+
+function addTransaction() {
+  const desc = document.getElementById('desc').value.trim();
+  const amount = parseFloat(document.getElementById('amount').value);
+  const category = document.getElementById('category').value;
+  const date = document.getElementById('date').value;
+  const currency = document.getElementById('currency').value;
+  if (!desc || !amount || !date) return alert('Please fill in all fields');
+  transactions.push({ id: Date.now(), type: currentType, desc, amount, category, date, currency });
+  save();
+  document.getElementById('desc').value = '';
+  document.getElementById('amount').value = '';
+  render();
+}
+
+function deleteTransaction(id) {
+  transactions = transactions.filter(t => t.id !== id);
+  save();
+  render();
+}
+
+function changeMonth(delta) {
+  viewDate.setMonth(viewDate.getMonth() + delta);
+  render();
+}
+
+function getMonthTx() {
+  const y = viewDate.getFullYear(), m = viewDate.getMonth();
+  return transactions.filter(t => {
+    const d = new Date(t.date);
+    return d.getFullYear() === y && d.getMonth() === m;
+  });
+}
+
+let cashflowChart, categoryChart, pieChart;
+
+function render() {
+  // Month label
+  document.getElementById('monthLabel').textContent = viewDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
+
+  // Set exchange rate input
+  document.getElementById('exchangeRate').value = getRate();
+
+  const monthTx = getMonthTx();
+  const totalIncome = monthTx.filter(t => t.type === 'income').reduce((s, t) => s + toJPY(t.amount, t.currency || 'JPY'), 0);
+  const totalExpense = monthTx.filter(t => t.type === 'expense').reduce((s, t) => s + toJPY(t.amount, t.currency || 'JPY'), 0);
+  const net = totalIncome - totalExpense;
+  const savingsRate = totalIncome > 0 ? ((net / totalIncome) * 100).toFixed(1) : '0.0';
+
+  // Summary cards
+  document.getElementById('summary').innerHTML = `
+    <div class="card"><div class="card-label">Income</div><div class="card-value income">${formatJPY(totalIncome)}</div><div class="card-sub">This month (JPY)</div></div>
+    <div class="card"><div class="card-label">Expenses</div><div class="card-value expense">${formatJPY(totalExpense)}</div><div class="card-sub">This month (JPY)</div></div>
+    <div class="card"><div class="card-label">Net Cash Flow</div><div class="card-value net">${formatJPY(net)}</div><div class="card-sub">${net >= 0 ? 'Surplus' : 'Deficit'}</div></div>
+    <div class="card"><div class="card-label">Savings Rate</div><div class="card-value net">${savingsRate}%</div><div class="card-sub">of income saved</div></div>
+  `;
+
+  // Transactions list
+  const filterType = document.getElementById('filterType').value;
+  const filtered = monthTx.filter(t => filterType === 'all' || t.type === filterType).sort((a, b) => new Date(b.date) - new Date(a.date));
+  const txList = document.getElementById('txList');
+  if (filtered.length === 0) {
+    txList.innerHTML = '<div class="empty">No transactions this month. Add one above!</div>';
+  } else {
+    txList.innerHTML = filtered.map(t => {
+      const cur = t.currency || 'JPY';
+      const jpyAmount = toJPY(t.amount, cur);
+      const showConverted = cur !== 'JPY';
+      return `
+      <div class="tx-item">
+        <div class="tx-left">
+          <div class="tx-icon ${t.type}">${CATEGORY_ICONS[t.category] || '📌'}</div>
+          <div><div class="tx-desc">${t.desc}</div><div class="tx-cat">${t.category}</div></div>
+        </div>
+        <div style="display:flex;align-items:center">
+          <div class="tx-right">
+            <div class="tx-amount ${t.type}">${t.type === 'income' ? '+' : '-'}${formatOriginal(t.amount, cur)}</div>
+            ${showConverted ? `<div class="tx-currency">${formatJPY(jpyAmount)}</div>` : ''}
+            <div class="tx-date">${new Date(t.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div>
+          </div>
+          <button class="tx-delete" onclick="deleteTransaction(${t.id})" title="Delete">&times;</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // Cash flow chart (last 6 months)
+  const months = [];
+  const incomeData = [], expenseData = [], netData = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(viewDate.getFullYear(), viewDate.getMonth() - i, 1);
+    const label = d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+    months.push(label);
+    const mTx = transactions.filter(t => { const td = new Date(t.date); return td.getFullYear() === d.getFullYear() && td.getMonth() === d.getMonth(); });
+    const inc = mTx.filter(t => t.type === 'income').reduce((s, t) => s + toJPY(t.amount, t.currency || 'JPY'), 0);
+    const exp = mTx.filter(t => t.type === 'expense').reduce((s, t) => s + toJPY(t.amount, t.currency || 'JPY'), 0);
+    incomeData.push(inc);
+    expenseData.push(exp);
+    netData.push(inc - exp);
+  }
+
+  if (cashflowChart) cashflowChart.destroy();
+  cashflowChart = new Chart(document.getElementById('cashflowChart'), {
+    type: 'bar',
+    data: {
+      labels: months,
+      datasets: [
+        { label: 'Income', data: incomeData, backgroundColor: '#238636', borderRadius: 4 },
+        { label: 'Expenses', data: expenseData, backgroundColor: '#da3633', borderRadius: 4 },
+        { label: 'Net', data: netData, type: 'line', borderColor: '#58a6ff', backgroundColor: 'transparent', borderWidth: 2, pointRadius: 4, pointBackgroundColor: '#58a6ff', tension: 0.3 }
+      ]
+    },
+    options: {
+      responsive: true, plugins: { legend: { labels: { color: '#8b949e' } } },
+      scales: { x: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' } }, y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' } } }
+    }
+  });
+
+  // Category breakdown (expenses this month)
+  const catMap = {};
+  monthTx.filter(t => t.type === 'expense').forEach(t => { catMap[t.category] = (catMap[t.category] || 0) + toJPY(t.amount, t.currency || 'JPY'); });
+  const catLabels = Object.keys(catMap).sort((a, b) => catMap[b] - catMap[a]);
+  const catValues = catLabels.map(c => catMap[c]);
+
+  if (categoryChart) categoryChart.destroy();
+  categoryChart = new Chart(document.getElementById('categoryChart'), {
+    type: 'doughnut',
+    data: { labels: catLabels, datasets: [{ data: catValues, backgroundColor: CATEGORY_COLORS.slice(0, catLabels.length), borderWidth: 0 }] },
+    options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { color: '#8b949e', padding: 12, font: { size: 11 } } } } }
+  });
+
+  // Pie chart income vs expense
+  if (pieChart) pieChart.destroy();
+  pieChart = new Chart(document.getElementById('pieChart'), {
+    type: 'doughnut',
+    data: { labels: ['Income', 'Expenses'], datasets: [{ data: [totalIncome, totalExpense], backgroundColor: ['#238636', '#da3633'], borderWidth: 0 }] },
+    options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { color: '#8b949e', padding: 12 } } } }
+  });
+}
+
+// Fetch live USD/JPY rate
+async function fetchLiveRate() {
+  const status = document.getElementById('rateStatus');
+  try {
+    const res = await fetch('https://api.frankfurter.dev/v1/latest?base=USD&symbols=JPY');
+    if (!res.ok) throw new Error('API error');
+    const data = await res.json();
+    const rate = data.rates.JPY;
+    localStorage.setItem('finance_usd_jpy', rate.toString());
+    localStorage.setItem('finance_rate_date', data.date);
+    document.getElementById('exchangeRate').value = rate;
+    status.textContent = `Live (${data.date})`;
+    status.className = 'rate-status live';
+    render();
+  } catch (e) {
+    status.textContent = 'Using manual rate';
+    status.className = 'rate-status manual';
+  }
+}
+
+// Init
+document.getElementById('date').value = new Date().toISOString().split('T')[0];
+setType('income');
+render();
+fetchLiveRate();
+</script>
+</body>
+</html>
