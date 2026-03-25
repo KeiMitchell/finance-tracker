@@ -339,6 +339,11 @@
         </select>
       </div>
     </div>
+    <div style="margin-bottom:12px; display:flex; align-items:center; gap:8px;">
+      <input type="password" id="geminiKey" placeholder="Gemini API key (for auto-categorize)" style="flex:1; padding:8px 12px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; font-size:13px;">
+      <button onclick="saveGeminiKey()" style="padding:8px 14px; background:#238636; border:none; border-radius:6px; color:#fff; font-size:13px; cursor:pointer; white-space:nowrap;">Save Key</button>
+      <a href="https://aistudio.google.com/apikey" target="_blank" style="font-size:12px; color:#58a6ff; white-space:nowrap;">Get free key</a>
+    </div>
     <div class="drop-zone" id="dropZone" onclick="document.getElementById('csvFile').click()">
       <p>Drop your CSV file here or click to browse</p>
       <small>Supports Rakuten Bank, SoFi &amp; AMEX statement exports</small>
@@ -433,6 +438,12 @@ const CATEGORY_COLORS = ['#58a6ff','#3fb950','#f0883e','#bc8cff','#f85149','#39d
 let transactions = JSON.parse(localStorage.getItem('finance_tx') || '[]');
 let currentType = 'income';
 let viewDate = new Date();
+
+// Show saved Gemini key status
+if (localStorage.getItem('finance_gemini_key')) {
+  const ki = document.getElementById('geminiKey');
+  if (ki) { ki.placeholder = 'Key saved! Auto-categorize enabled.'; }
+}
 
 function getRate() { return parseFloat(localStorage.getItem('finance_usd_jpy') || '150'); }
 function saveRate() { localStorage.setItem('finance_usd_jpy', document.getElementById('exchangeRate').value); }
@@ -897,32 +908,86 @@ function splitCSVLine(line) {
   return result;
 }
 
-function showPreview(items) {
+function saveGeminiKey() {
+  const key = document.getElementById('geminiKey').value.trim();
+  if (key) {
+    localStorage.setItem('finance_gemini_key', key);
+    document.getElementById('geminiKey').value = '';
+    document.getElementById('geminiKey').placeholder = 'Key saved! Auto-categorize enabled.';
+  }
+}
+
+async function categorizeWithGemini(items) {
+  const apiKey = localStorage.getItem('finance_gemini_key');
+  if (!apiKey || items.length === 0) return items;
+
+  const expCats = EXPENSE_CATEGORIES.join(', ');
+  const incCats = INCOME_CATEGORIES.join(', ');
+  const descs = items.map((t, i) => `${i}. [${t.type}] ${t.desc} (${t.currency} ${t.amount})`).join('\n');
+
+  const prompt = `Categorize these transactions. For expenses use ONLY: ${expCats}. For income use ONLY: ${incCats}.
+Reply with ONLY a JSON array of category strings, one per transaction, in the same order. No explanation.
+
+${descs}`;
+
+  try {
+    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+    });
+    const data = await resp.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const match = text.match(/\[[\s\S]*\]/);
+    if (match) {
+      const cats = JSON.parse(match[0]);
+      items.forEach((t, i) => { if (cats[i]) t.category = cats[i]; });
+    }
+  } catch (e) {
+    console.warn('Gemini categorization failed:', e);
+  }
+  return items;
+}
+
+async function showPreview(items) {
   if (items.length === 0) {
     showImportResult('No transactions found in the CSV file.', 'error');
     return;
   }
+
+  // Auto-categorize if Gemini key is set
+  const hasKey = !!localStorage.getItem('finance_gemini_key');
+  if (hasKey) {
+    showImportResult('Categorizing transactions with AI...', 'success');
+    await categorizeWithGemini(items);
+    document.getElementById('importResult').innerHTML = '';
+  }
+
   const incomeCount = items.filter(t => t.type === 'income').length;
   const expenseCount = items.filter(t => t.type === 'expense').length;
   const preview = document.getElementById('importPreview');
-  const showItems = items.slice(0, 10);
+  const allCats = [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES];
+  const showItems = items.slice(0, 15);
   preview.innerHTML = `
     <table class="preview-table">
-      <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Type</th></tr></thead>
+      <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Category</th></tr></thead>
       <tbody>
-        ${showItems.map(t => `
+        ${showItems.map((t, i) => `
           <tr>
             <td>${t.date}</td>
             <td>${t.desc}</td>
             <td class="${t.type}">${t.type === 'income' ? '+' : '-'}${formatOriginal(t.amount, t.currency)}</td>
-            <td>${t.type}</td>
+            <td><select onchange="pendingImport[${i}].category=this.value" style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:2px 4px;font-size:12px;">
+              ${allCats.map(c => `<option value="${c}"${c === t.category ? ' selected' : ''}>${c}</option>`).join('')}
+            </select></td>
           </tr>
         `).join('')}
-        ${items.length > 10 ? `<tr><td colspan="4" style="color:#8b949e; text-align:center">...and ${items.length - 10} more</td></tr>` : ''}
+        ${items.length > 15 ? `<tr><td colspan="4" style="color:#8b949e; text-align:center">...and ${items.length - 15} more</td></tr>` : ''}
       </tbody>
     </table>
     <div style="margin-top:12px; color:#8b949e; font-size:13px">
       Found <strong>${items.length}</strong> transactions: ${incomeCount} income, ${expenseCount} expenses
+      ${hasKey ? ' — <span style="color:#3fb950">AI categorized</span>' : ''}
     </div>
     <div class="preview-actions">
       <button class="btn-import confirm" onclick="confirmImport()">Import ${items.length} transactions</button>
