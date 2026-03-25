@@ -280,6 +280,7 @@
           <option value="expense">Expense</option>
         </select>
         <button id="recategorizeBtn" onclick="recategorizeAll()" style="padding:6px 12px; background:#1f6feb; border:none; border-radius:6px; color:#fff; font-size:12px; cursor:pointer; display:none;">AI Categorize</button>
+        <button onclick="removeDuplicates()" style="padding:6px 12px; background:#21262d; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; font-size:12px; cursor:pointer;">Remove Duplicates</button>
       </div>
     </div>
     <div class="tx-list" id="txList"></div>
@@ -1149,6 +1150,22 @@ async function showPreview(items, skipAI) {
       });
     }
   }
+}
+
+function removeDuplicates() {
+  const seen = new Set();
+  const before = transactions.length;
+  transactions = transactions.filter(t => {
+    const key = `${t.date}|${t.desc}|${t.amount}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const removed = before - transactions.length;
+  if (removed === 0) { alert('No duplicates found.'); return; }
+  saveLocal();
+  render();
+  alert(`Removed ${removed} duplicate transactions.`);
 }
 
 function isDuplicate(t) {
