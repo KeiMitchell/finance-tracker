@@ -1097,51 +1097,38 @@ async function showPreview(items) {
 }
 
 async function confirmImport() {
-  try {
   const count = pendingImport.length;
-  if (count === 0) return;
-  // Clean internal properties before saving
-  const cleanItems = pendingImport.map(t => {
+  if (count === 0) { showImportResult('No transactions to import.', 'error'); return; }
+
+  // Always save locally — simple and reliable
+  pendingImport.forEach(t => {
     const { _confident, ...clean } = t;
-    return clean;
+    transactions.push({ id: Date.now() + Math.random(), ...clean });
   });
 
+  saveLocal();
+
+  // Also try Supabase if logged in (non-blocking)
   if (currentUser) {
-    const dbRows = await bulkInsertToSupabase(cleanItems);
-    if (dbRows.length > 0) {
-      dbRows.forEach(row => {
-        transactions.push({
-          id: row.id,
-          type: row.type,
-          desc: row.description,
-          amount: parseFloat(row.amount),
-          currency: row.currency,
-          category: row.category,
-          date: row.date
-        });
-      });
-    } else {
-      // Supabase failed — save locally so data isn't lost
-      console.warn('Supabase insert failed, saving locally');
-      cleanItems.forEach(t => {
-        transactions.push({ id: Date.now() + Math.random(), ...t });
-      });
-    }
-  } else {
-    cleanItems.forEach(t => {
-      transactions.push({ id: Date.now() + Math.random(), ...t });
+    const rows = pendingImport.map(t => ({
+      user_id: currentUser.id,
+      type: t.type,
+      description: t.desc,
+      amount: t.amount,
+      currency: t.currency,
+      category: t.category,
+      date: t.date
+    }));
+    sb.from('transactions').insert(rows).then(({ error }) => {
+      if (error) console.warn('Supabase sync failed:', error);
     });
   }
 
-  saveLocal();
   pendingImport = [];
   document.getElementById('importPreview').innerHTML = '';
   document.getElementById('csvFile').value = '';
   render();
   showImportResult(`Successfully imported ${count} transactions.`, 'success');
-  } catch (err) {
-    showImportResult('Import error: ' + err.message, 'error');
-  }
 }
 
 function cancelImport() {
