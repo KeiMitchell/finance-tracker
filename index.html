@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Personal Finance Tracker</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1117; color: #e1e4e8; min-height: 100vh; }
@@ -12,6 +13,25 @@
   .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
   h1 { font-size: 28px; font-weight: 700; margin-bottom: 24px; color: #fff; }
   h2 { font-size: 18px; font-weight: 600; margin-bottom: 16px; color: #c9d1d9; }
+
+  /* Auth UI */
+  .auth-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 12px 16px; flex-wrap: wrap; }
+  .auth-bar input { padding: 8px 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e1e4e8; font-size: 14px; width: 200px; }
+  .auth-bar input:focus { border-color: #58a6ff; outline: none; }
+  .auth-bar button { padding: 8px 16px; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .auth-bar .btn-login { background: #238636; color: #fff; }
+  .auth-bar .btn-login:hover { background: #2ea043; }
+  .auth-bar .btn-signup { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
+  .auth-bar .btn-signup:hover { background: #30363d; }
+  .auth-bar .btn-logout { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
+  .auth-bar .btn-logout:hover { background: #30363d; }
+  .auth-user { font-size: 13px; color: #8b949e; }
+  .auth-user strong { color: #58a6ff; }
+  .auth-status { font-size: 12px; padding: 2px 8px; border-radius: 4px; }
+  .auth-status.online { color: #3fb950; background: #0f2d1a; }
+  .auth-status.offline { color: #e3b341; background: #2d2a11; }
+  .auth-error { font-size: 12px; color: #f85149; }
+  .sync-indicator { font-size: 12px; color: #8b949e; margin-left: auto; }
 
   /* Summary Cards */
   .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px; }
@@ -128,6 +148,15 @@
 <div class="container">
   <h1>Finance Tracker</h1>
 
+  <!-- Auth Bar -->
+  <div class="auth-bar" id="authBar">
+    <input type="email" id="authEmail" placeholder="Email">
+    <input type="password" id="authPassword" placeholder="Password">
+    <button class="btn-login" onclick="login()">Log in</button>
+    <button class="btn-signup" onclick="signup()">Sign up</button>
+    <span class="auth-error" id="authError"></span>
+  </div>
+
   <div class="month-nav">
     <button onclick="changeMonth(-1)">&larr; Prev</button>
     <span id="monthLabel"></span>
@@ -229,6 +258,75 @@
 </div>
 
 <script>
+// --- Supabase Init ---
+const SUPABASE_URL = 'https://rmofkucptycwkkuhiqsf.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJtb2ZrdWNwdHljd2trdWhpcXNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0MTAzMzIsImV4cCI6MjA4OTk4NjMzMn0.tE0dAzkgyuo_RnYJU8Z4uVOd0gOUEOe5pMx1GX1HdSc';
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+let currentUser = null;
+
+// --- Auth Functions ---
+async function login() {
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  if (!email || !password) return showAuthError('Enter email and password');
+  showAuthError('');
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) showAuthError(error.message);
+}
+
+async function signup() {
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  if (!email || !password) return showAuthError('Enter email and password');
+  if (password.length < 6) return showAuthError('Password must be at least 6 characters');
+  showAuthError('');
+  const { error } = await supabase.auth.signUp({ email, password });
+  if (error) showAuthError(error.message);
+  else showAuthError('Check your email to confirm, then log in.');
+}
+
+async function logout() {
+  await supabase.auth.signOut();
+}
+
+function showAuthError(msg) {
+  document.getElementById('authError').textContent = msg;
+}
+
+function updateAuthUI() {
+  const bar = document.getElementById('authBar');
+  if (currentUser) {
+    bar.innerHTML = `
+      <span class="auth-user">Logged in as <strong>${currentUser.email}</strong></span>
+      <span class="auth-status online">Synced</span>
+      <button class="btn-logout" onclick="logout()">Log out</button>
+    `;
+  } else {
+    bar.innerHTML = `
+      <input type="email" id="authEmail" placeholder="Email">
+      <input type="password" id="authPassword" placeholder="Password">
+      <button class="btn-login" onclick="login()">Log in</button>
+      <button class="btn-signup" onclick="signup()">Sign up</button>
+      <span class="auth-error" id="authError"></span>
+      <span class="auth-status offline" style="margin-left:auto">Local only</span>
+    `;
+  }
+}
+
+// Listen for auth changes
+supabase.auth.onAuthStateChange(async (event, session) => {
+  currentUser = session?.user || null;
+  updateAuthUI();
+  if (currentUser) {
+    await loadFromSupabase();
+  } else {
+    // Fall back to localStorage
+    transactions = JSON.parse(localStorage.getItem('finance_tx') || '[]');
+  }
+  render();
+});
+
+// --- Data ---
 const INCOME_CATEGORIES = ['Salary', 'Freelance', 'Investment', 'Side Hustle', 'Gift', 'Refund', 'Other Income'];
 const EXPENSE_CATEGORIES = ['Rent/Housing', 'Groceries', 'Dining Out', 'Transport', 'Utilities', 'Subscriptions', 'Shopping', 'Entertainment', 'Health', 'Insurance', 'Education', 'Travel', 'Gifts', 'Savings', 'Other'];
 const CATEGORY_ICONS = {
@@ -255,8 +353,71 @@ function formatOriginal(amount, currency) {
   return new Intl.NumberFormat('ja-JP', { style: 'currency', currency: 'JPY', maximumFractionDigits: 0 }).format(amount);
 }
 
-function save() { localStorage.setItem('finance_tx', JSON.stringify(transactions)); }
+function saveLocal() { localStorage.setItem('finance_tx', JSON.stringify(transactions)); }
 
+// --- Supabase Data Sync ---
+async function loadFromSupabase() {
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('*')
+    .eq('user_id', currentUser.id)
+    .order('date', { ascending: false });
+  if (error) {
+    console.error('Load error:', error);
+    transactions = JSON.parse(localStorage.getItem('finance_tx') || '[]');
+    return;
+  }
+  // Map DB rows to local format
+  transactions = data.map(row => ({
+    id: row.id,
+    type: row.type,
+    desc: row.description,
+    amount: parseFloat(row.amount),
+    currency: row.currency,
+    category: row.category,
+    date: row.date
+  }));
+  saveLocal(); // cache locally
+}
+
+async function insertToSupabase(tx) {
+  if (!currentUser) return;
+  const { data, error } = await supabase.from('transactions').insert({
+    user_id: currentUser.id,
+    type: tx.type,
+    description: tx.desc,
+    amount: tx.amount,
+    currency: tx.currency,
+    category: tx.category,
+    date: tx.date
+  }).select();
+  if (error) { console.error('Insert error:', error); return null; }
+  return data[0];
+}
+
+async function deleteFromSupabase(id) {
+  if (!currentUser) return;
+  const { error } = await supabase.from('transactions').delete().eq('id', id).eq('user_id', currentUser.id);
+  if (error) console.error('Delete error:', error);
+}
+
+async function bulkInsertToSupabase(items) {
+  if (!currentUser) return [];
+  const rows = items.map(tx => ({
+    user_id: currentUser.id,
+    type: tx.type,
+    description: tx.desc,
+    amount: tx.amount,
+    currency: tx.currency,
+    category: tx.category,
+    date: tx.date
+  }));
+  const { data, error } = await supabase.from('transactions').insert(rows).select();
+  if (error) { console.error('Bulk insert error:', error); return []; }
+  return data;
+}
+
+// --- Core Functions ---
 function setType(type) {
   currentType = type;
   const catSelect = document.getElementById('category');
@@ -269,23 +430,32 @@ function setType(type) {
   btn.textContent = type === 'income' ? '+ Add Income' : '+ Add Expense';
 }
 
-function addTransaction() {
+async function addTransaction() {
   const desc = document.getElementById('desc').value.trim();
   const amount = parseFloat(document.getElementById('amount').value);
   const category = document.getElementById('category').value;
   const date = document.getElementById('date').value;
   const currency = document.getElementById('currency').value;
   if (!desc || !amount || !date) return alert('Please fill in all fields');
-  transactions.push({ id: Date.now(), type: currentType, desc, amount, category, date, currency });
-  save();
+
+  const tx = { id: Date.now(), type: currentType, desc, amount, category, date, currency };
+
+  if (currentUser) {
+    const dbRow = await insertToSupabase(tx);
+    if (dbRow) tx.id = dbRow.id;
+  }
+
+  transactions.push(tx);
+  saveLocal();
   document.getElementById('desc').value = '';
   document.getElementById('amount').value = '';
   render();
 }
 
-function deleteTransaction(id) {
+async function deleteTransaction(id) {
+  if (currentUser) await deleteFromSupabase(id);
   transactions = transactions.filter(t => t.id !== id);
-  save();
+  saveLocal();
   render();
 }
 
@@ -305,10 +475,7 @@ function getMonthTx() {
 let cashflowChart, categoryChart, pieChart;
 
 function render() {
-  // Month label
   document.getElementById('monthLabel').textContent = viewDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
-
-  // Set exchange rate input
   document.getElementById('exchangeRate').value = getRate();
 
   const monthTx = getMonthTx();
@@ -317,7 +484,6 @@ function render() {
   const net = totalIncome - totalExpense;
   const savingsRate = totalIncome > 0 ? ((net / totalIncome) * 100).toFixed(1) : '0.0';
 
-  // Summary cards
   document.getElementById('summary').innerHTML = `
     <div class="card"><div class="card-label">Income</div><div class="card-value income">${formatJPY(totalIncome)}</div><div class="card-sub">This month (JPY)</div></div>
     <div class="card"><div class="card-label">Expenses</div><div class="card-value expense">${formatJPY(totalExpense)}</div><div class="card-sub">This month (JPY)</div></div>
@@ -386,7 +552,7 @@ function render() {
     }
   });
 
-  // Category breakdown (expenses this month)
+  // Category breakdown
   const catMap = {};
   monthTx.filter(t => t.type === 'expense').forEach(t => { catMap[t.category] = (catMap[t.category] || 0) + toJPY(t.amount, t.currency || 'JPY'); });
   const catLabels = Object.keys(catMap).sort((a, b) => catMap[b] - catMap[a]);
@@ -399,7 +565,6 @@ function render() {
     options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { color: '#8b949e', padding: 12, font: { size: 11 } } } } }
   });
 
-  // Pie chart income vs expense
   if (pieChart) pieChart.destroy();
   pieChart = new Chart(document.getElementById('pieChart'), {
     type: 'doughnut',
@@ -411,7 +576,6 @@ function render() {
 // --- CSV Import ---
 let pendingImport = [];
 
-// Drag and drop
 const dropZone = document.getElementById('dropZone');
 dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
@@ -433,7 +597,6 @@ function handleCSVFile(file) {
       showImportResult('Error parsing CSV: ' + err.message, 'error');
     }
   };
-  // Rakuten Bank CSVs are Shift_JIS encoded
   const bank = document.getElementById('bankSelect').value;
   if (bank === 'rakuten') {
     reader.readAsText(file, 'Shift_JIS');
@@ -450,14 +613,11 @@ function parseCSV(text, bank) {
 }
 
 function parseRakuten(lines) {
-  // Rakuten Bank CSV: 取引日,入出金(税込),残高,摘要
-  // Date format: YYYYMMDD, amount can be negative (withdrawal) or positive (deposit)
   const results = [];
   for (let i = 0; i < lines.length; i++) {
     const cols = lines[i].split(',');
     if (cols.length < 4) continue;
     const dateStr = cols[0].replace(/"/g, '').trim();
-    // Skip header row
     if (dateStr === '取引日' || !/^\d{8}$/.test(dateStr)) continue;
     const date = dateStr.slice(0,4) + '-' + dateStr.slice(4,6) + '-' + dateStr.slice(6,8);
     const rawAmount = parseInt(cols[1].replace(/"/g, '').replace(/,/g, '').trim(), 10);
@@ -475,8 +635,6 @@ function parseRakuten(lines) {
 }
 
 function parseSoFi(lines) {
-  // SoFi CSV: Date,Description,Amount,Type (or similar)
-  // Find header row first
   const results = [];
   let headerIdx = -1;
   let colMap = {};
@@ -500,7 +658,6 @@ function parseSoFi(lines) {
     if (cols.length < 3) continue;
     const rawDate = cols[colMap.date]?.trim();
     if (!rawDate) continue;
-    // Parse date: MM/DD/YYYY or YYYY-MM-DD
     let date;
     if (rawDate.includes('/')) {
       const parts = rawDate.split('/');
@@ -523,8 +680,7 @@ function parseSoFi(lines) {
 }
 
 function parseGeneric(lines) {
-  // Try to auto-detect: look for header with date, description/name, amount
-  return parseSoFi(lines); // same logic works for most generic CSVs
+  return parseSoFi(lines);
 }
 
 function splitCSVLine(line) {
@@ -574,12 +730,29 @@ function showPreview(items) {
   `;
 }
 
-function confirmImport() {
+async function confirmImport() {
   const count = pendingImport.length;
-  pendingImport.forEach(t => {
-    transactions.push({ id: Date.now() + Math.random(), ...t });
-  });
-  save();
+
+  if (currentUser) {
+    const dbRows = await bulkInsertToSupabase(pendingImport);
+    dbRows.forEach(row => {
+      transactions.push({
+        id: row.id,
+        type: row.type,
+        desc: row.description,
+        amount: parseFloat(row.amount),
+        currency: row.currency,
+        category: row.category,
+        date: row.date
+      });
+    });
+  } else {
+    pendingImport.forEach(t => {
+      transactions.push({ id: Date.now() + Math.random(), ...t });
+    });
+  }
+
+  saveLocal();
   pendingImport = [];
   document.getElementById('importPreview').innerHTML = '';
   document.getElementById('csvFile').value = '';
