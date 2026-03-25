@@ -79,6 +79,9 @@
   .tx-icon { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
   .tx-icon.income { background: #0f2d1a; }
   .tx-icon.expense { background: #2d1117; }
+  .tx-icon.transfer { background: #1c1f26; }
+  .tx-amount.transfer { color: #8b949e; }
+  .tx-transfer-badge { font-size: 10px; color: #8b949e; background: #21262d; padding: 1px 6px; border-radius: 4px; margin-left: 4px; }
   .tx-desc { font-size: 14px; font-weight: 500; }
   .tx-cat { font-size: 12px; color: #8b949e; }
   .tx-right { text-align: right; }
@@ -416,12 +419,13 @@ sb && sb.auth.onAuthStateChange(async (event, session) => {
 
 // --- Data ---
 const INCOME_CATEGORIES = ['Salary', 'Freelance', 'Investment', 'Side Hustle', 'Gift', 'Refund', 'Other Income'];
-const EXPENSE_CATEGORIES = ['Rent/Housing', 'Groceries', 'Dining Out', 'Transport', 'Utilities', 'Subscriptions', 'Shopping', 'Entertainment', 'Health', 'Insurance', 'Education', 'Travel', 'Gifts', 'Savings', 'Other'];
+const EXPENSE_CATEGORIES = ['Rent/Housing', 'Groceries', 'Dining Out', 'Transport', 'Utilities', 'Subscriptions', 'Shopping', 'Entertainment', 'Health', 'Insurance', 'Education', 'Travel', 'Gifts', 'Savings', 'Credit Card Payment', 'Other'];
+const TRANSFER_CATEGORIES = ['Credit Card Payment'];
 const CATEGORY_ICONS = {
   'Salary': '💰', 'Freelance': '💻', 'Investment': '📈', 'Side Hustle': '🔧', 'Gift': '🎁', 'Refund': '↩️', 'Other Income': '💵',
   'Rent/Housing': '🏠', 'Groceries': '🛒', 'Dining Out': '🍽️', 'Transport': '🚗', 'Utilities': '⚡', 'Subscriptions': '📱',
   'Shopping': '🛍️', 'Entertainment': '🎬', 'Health': '💊', 'Insurance': '🛡️', 'Education': '📚', 'Travel': '✈️',
-  'Gifts': '🎁', 'Savings': '🏦', 'Other': '📌'
+  'Gifts': '🎁', 'Savings': '🏦', 'Credit Card Payment': '💳', 'Other': '📌'
 };
 const CATEGORY_COLORS = ['#58a6ff','#3fb950','#f0883e','#bc8cff','#f85149','#39d2c0','#db61a2','#e3b341','#8b949e','#79c0ff','#56d364','#d2a8ff','#ff7b72','#a5d6ff','#7ee787'];
 
@@ -432,6 +436,7 @@ let viewDate = new Date();
 function getRate() { return parseFloat(localStorage.getItem('finance_usd_jpy') || '150'); }
 function saveRate() { localStorage.setItem('finance_usd_jpy', document.getElementById('exchangeRate').value); }
 function toJPY(amount, currency) { return currency === 'USD' ? amount * getRate() : amount; }
+function isTransfer(t) { return TRANSFER_CATEGORIES.includes(t.category); }
 
 function formatJPY(n) {
   return new Intl.NumberFormat('ja-JP', { style: 'currency', currency: 'JPY', maximumFractionDigits: 0 }).format(Math.round(n));
@@ -568,7 +573,8 @@ function render() {
 
   const monthTx = getMonthTx();
   const totalIncome = monthTx.filter(t => t.type === 'income').reduce((s, t) => s + toJPY(t.amount, t.currency || 'JPY'), 0);
-  const totalExpense = monthTx.filter(t => t.type === 'expense').reduce((s, t) => s + toJPY(t.amount, t.currency || 'JPY'), 0);
+  const totalExpense = monthTx.filter(t => t.type === 'expense' && !isTransfer(t)).reduce((s, t) => s + toJPY(t.amount, t.currency || 'JPY'), 0);
+  const totalTransfers = monthTx.filter(t => t.type === 'expense' && isTransfer(t)).reduce((s, t) => s + toJPY(t.amount, t.currency || 'JPY'), 0);
   const net = totalIncome - totalExpense;
   const savingsRate = totalIncome > 0 ? ((net / totalIncome) * 100).toFixed(1) : '0.0';
 
@@ -576,6 +582,7 @@ function render() {
     <div class="card"><div class="card-label">Income</div><div class="card-value income">${formatJPY(totalIncome)}</div><div class="card-sub">This month (JPY)</div></div>
     <div class="card"><div class="card-label">Expenses</div><div class="card-value expense">${formatJPY(totalExpense)}</div><div class="card-sub">This month (JPY)</div></div>
     <div class="card"><div class="card-label">Net Cash Flow</div><div class="card-value net">${formatJPY(net)}</div><div class="card-sub">${net >= 0 ? 'Surplus' : 'Deficit'}</div></div>
+    ${totalTransfers > 0 ? `<div class="card"><div class="card-label">CC Payments</div><div class="card-value" style="color:#8b949e">${formatJPY(totalTransfers)}</div><div class="card-sub">not counted in expenses</div></div>` : ''}
     <div class="card"><div class="card-label">Savings Rate</div><div class="card-value net">${savingsRate}%</div><div class="card-sub">of income saved</div></div>
     <div class="card"><div class="card-label">Subscriptions</div><div class="card-value subs">${formatJPY(subscriptions.reduce((s, sub) => s + getMonthlyAmount(sub), 0))}</div><div class="card-sub">per month</div></div>
     ${Object.keys(budgets).length > 0 ? `<div class="card"><div class="card-label">Budget</div><div class="card-value budget">${formatJPY(Object.values(budgets).reduce((a,b) => a+b, 0) - totalExpense)}</div><div class="card-sub">${Object.values(budgets).reduce((a,b) => a+b, 0) - totalExpense >= 0 ? 'remaining' : 'over budget'}</div></div>` : ''}
@@ -592,15 +599,18 @@ function render() {
       const cur = t.currency || 'JPY';
       const jpyAmount = toJPY(t.amount, cur);
       const showConverted = cur !== 'JPY';
+      const transfer = isTransfer(t);
+      const amountClass = transfer ? 'transfer' : t.type;
+      const iconClass = transfer ? 'transfer' : t.type;
       return `
       <div class="tx-item">
         <div class="tx-left">
-          <div class="tx-icon ${t.type}">${CATEGORY_ICONS[t.category] || '📌'}</div>
-          <div><div class="tx-desc">${t.desc}</div><div class="tx-cat">${t.category}</div></div>
+          <div class="tx-icon ${iconClass}">${CATEGORY_ICONS[t.category] || '📌'}</div>
+          <div><div class="tx-desc">${t.desc}${transfer ? '<span class="tx-transfer-badge">transfer</span>' : ''}</div><div class="tx-cat">${t.category}</div></div>
         </div>
         <div style="display:flex;align-items:center">
           <div class="tx-right">
-            <div class="tx-amount ${t.type}">${t.type === 'income' ? '+' : '-'}${formatOriginal(t.amount, cur)}</div>
+            <div class="tx-amount ${amountClass}">${t.type === 'income' ? '+' : '-'}${formatOriginal(t.amount, cur)}</div>
             ${showConverted ? `<div class="tx-currency">${formatJPY(jpyAmount)}</div>` : ''}
             <div class="tx-date">${new Date(t.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div>
           </div>
@@ -619,7 +629,7 @@ function render() {
     months.push(label);
     const mTx = transactions.filter(t => { const td = new Date(t.date); return td.getFullYear() === d.getFullYear() && td.getMonth() === d.getMonth(); });
     const inc = mTx.filter(t => t.type === 'income').reduce((s, t) => s + toJPY(t.amount, t.currency || 'JPY'), 0);
-    const exp = mTx.filter(t => t.type === 'expense').reduce((s, t) => s + toJPY(t.amount, t.currency || 'JPY'), 0);
+    const exp = mTx.filter(t => t.type === 'expense' && !isTransfer(t)).reduce((s, t) => s + toJPY(t.amount, t.currency || 'JPY'), 0);
     incomeData.push(inc);
     expenseData.push(exp);
     netData.push(inc - exp);
@@ -644,7 +654,7 @@ function render() {
 
   // Category breakdown
   const catMap = {};
-  monthTx.filter(t => t.type === 'expense').forEach(t => { catMap[t.category] = (catMap[t.category] || 0) + toJPY(t.amount, t.currency || 'JPY'); });
+  monthTx.filter(t => t.type === 'expense' && !isTransfer(t)).forEach(t => { catMap[t.category] = (catMap[t.category] || 0) + toJPY(t.amount, t.currency || 'JPY'); });
   const catLabels = Object.keys(catMap).sort((a, b) => catMap[b] - catMap[a]);
   const catValues = catLabels.map(c => catMap[c]);
 
