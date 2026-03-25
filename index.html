@@ -878,13 +878,23 @@ function parseAmex(lines) {
     if (isNaN(rawAmount) || rawAmount === 0) continue;
     const desc = cols[colMap.desc]?.trim() || 'AMEX Transaction';
     let currency = isJapanese ? 'JPY' : 'USD';
-    // AMEX: positive = charge (expense), negative = payment/credit (income/refund)
+    // Detect bank transfer (口座振替) = credit card payment from bank account
+    const isCardPayment = desc.includes('口座振替') || desc.toLowerCase().includes('payment');
+    let type, category;
+    if (isCardPayment) {
+      type = 'expense';
+      category = 'Credit Card Payment';
+    } else if (rawAmount > 0) {
+      type = 'expense';
+      category = 'Other';
+    } else {
+      type = 'income';
+      category = 'Refund';
+    }
     results.push({
       date, desc,
       amount: Math.abs(rawAmount),
-      type: rawAmount > 0 ? 'expense' : 'income',
-      currency,
-      category: rawAmount > 0 ? 'Other' : 'Refund'
+      type, currency, category
     });
   }
   return results;
