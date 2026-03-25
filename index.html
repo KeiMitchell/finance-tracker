@@ -160,6 +160,32 @@
   .sub-total-label { font-size: 14px; color: #8b949e; }
   .sub-total-value { font-size: 20px; font-weight: 700; color: #bc8cff; }
   .card-value.subs { color: #bc8cff; }
+
+  /* Budgets */
+  .budget-section { margin-top: 24px; background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px; }
+  .budget-form { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+  .budget-form select, .budget-form input { padding: 10px 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; color: #e1e4e8; font-size: 13px; }
+  .budget-form input:focus, .budget-form select:focus { border-color: #58a6ff; outline: none; }
+  .btn-add-budget { padding: 10px 20px; background: #e3b341; color: #0d1117; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .btn-add-budget:hover { background: #d29922; }
+  .budget-list { display: flex; flex-direction: column; gap: 12px; }
+  .budget-item { padding: 14px 16px; background: #0d1117; border: 1px solid #21262d; border-radius: 10px; }
+  .budget-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .budget-cat { font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+  .budget-amounts { font-size: 13px; color: #8b949e; }
+  .budget-amounts strong { color: #e1e4e8; }
+  .budget-bar { height: 8px; background: #21262d; border-radius: 4px; overflow: hidden; }
+  .budget-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
+  .budget-fill.safe { background: #238636; }
+  .budget-fill.warn { background: #e3b341; }
+  .budget-fill.over { background: #f85149; }
+  .budget-footer { display: flex; justify-content: space-between; margin-top: 6px; font-size: 12px; color: #8b949e; }
+  .budget-footer .over { color: #f85149; font-weight: 600; }
+  .budget-footer .under { color: #3fb950; }
+  .budget-delete { background: none; border: none; color: #484f58; cursor: pointer; font-size: 14px; padding: 4px; }
+  .budget-delete:hover { color: #f85149; }
+  .budget-summary { margin-top: 12px; padding: 12px 16px; background: #1a1a0e; border: 1px solid #3d3d1e; border-radius: 10px; display: flex; justify-content: space-between; align-items: center; }
+  .card-value.budget { color: #e3b341; }
 </style>
 </head>
 <body>
@@ -283,6 +309,19 @@
     </div>
     <div class="sub-list" id="subList"></div>
     <div class="sub-total" id="subTotal"></div>
+  </div>
+
+  <div class="budget-section">
+    <h2>Monthly Budgets</h2>
+    <div class="budget-form">
+      <select id="budgetCategory">
+        <option value="">Select category...</option>
+      </select>
+      <input type="number" id="budgetAmount" placeholder="Budget (JPY)" min="0" step="100">
+      <button class="btn-add-budget" onclick="addBudget()">Set Budget</button>
+    </div>
+    <div class="budget-list" id="budgetList"></div>
+    <div class="budget-summary" id="budgetSummary"></div>
   </div>
 
   <div class="import-section">
@@ -539,6 +578,7 @@ function render() {
     <div class="card"><div class="card-label">Net Cash Flow</div><div class="card-value net">${formatJPY(net)}</div><div class="card-sub">${net >= 0 ? 'Surplus' : 'Deficit'}</div></div>
     <div class="card"><div class="card-label">Savings Rate</div><div class="card-value net">${savingsRate}%</div><div class="card-sub">of income saved</div></div>
     <div class="card"><div class="card-label">Subscriptions</div><div class="card-value subs">${formatJPY(subscriptions.reduce((s, sub) => s + getMonthlyAmount(sub), 0))}</div><div class="card-sub">per month</div></div>
+    ${Object.keys(budgets).length > 0 ? `<div class="card"><div class="card-label">Budget</div><div class="card-value budget">${formatJPY(Object.values(budgets).reduce((a,b) => a+b, 0) - totalExpense)}</div><div class="card-sub">${Object.values(budgets).reduce((a,b) => a+b, 0) - totalExpense >= 0 ? 'remaining' : 'over budget'}</div></div>` : ''}
   `;
 
   // Transactions list
@@ -621,6 +661,8 @@ function render() {
     data: { labels: ['Income', 'Expenses'], datasets: [{ data: [totalIncome, totalExpense], backgroundColor: ['#238636', '#da3633'], borderWidth: 0 }] },
     options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { color: '#8b949e', padding: 12 } } } }
   });
+
+  renderBudgets();
 }
 
 // --- CSV Import ---
@@ -895,6 +937,89 @@ function renderSubs() {
   `;
 }
 
+// --- Budgets ---
+let budgets = JSON.parse(localStorage.getItem('finance_budgets') || '{}');
+
+function saveBudgets() { localStorage.setItem('finance_budgets', JSON.stringify(budgets)); }
+
+function populateBudgetCategories() {
+  const sel = document.getElementById('budgetCategory');
+  const existing = Object.keys(budgets);
+  const available = EXPENSE_CATEGORIES.filter(c => !existing.includes(c));
+  sel.innerHTML = '<option value="">Select category...</option>' + available.map(c => `<option value="${c}">${CATEGORY_ICONS[c] || ''} ${c}</option>`).join('');
+}
+
+function addBudget() {
+  const cat = document.getElementById('budgetCategory').value;
+  const amount = parseFloat(document.getElementById('budgetAmount').value);
+  if (!cat || !amount) return alert('Select a category and enter a budget amount');
+  budgets[cat] = amount;
+  saveBudgets();
+  document.getElementById('budgetAmount').value = '';
+  populateBudgetCategories();
+  renderBudgets();
+}
+
+function deleteBudget(cat) {
+  delete budgets[cat];
+  saveBudgets();
+  populateBudgetCategories();
+  renderBudgets();
+}
+
+function renderBudgets() {
+  const list = document.getElementById('budgetList');
+  const cats = Object.keys(budgets);
+  if (cats.length === 0) {
+    list.innerHTML = '<div class="empty">No budgets set. Add one above to track your spending limits!</div>';
+    document.getElementById('budgetSummary').style.display = 'none';
+    return;
+  }
+  document.getElementById('budgetSummary').style.display = 'flex';
+
+  const monthTx = getMonthTx();
+  const spending = {};
+  monthTx.filter(t => t.type === 'expense').forEach(t => {
+    spending[t.category] = (spending[t.category] || 0) + toJPY(t.amount, t.currency || 'JPY');
+  });
+
+  let totalBudget = 0, totalSpent = 0;
+
+  list.innerHTML = cats.map(cat => {
+    const limit = budgets[cat];
+    const spent = spending[cat] || 0;
+    const pct = Math.min((spent / limit) * 100, 100);
+    const remaining = limit - spent;
+    const fillClass = pct >= 100 ? 'over' : pct >= 75 ? 'warn' : 'safe';
+    totalBudget += limit;
+    totalSpent += spent;
+
+    return `
+    <div class="budget-item">
+      <div class="budget-header">
+        <div class="budget-cat">${CATEGORY_ICONS[cat] || '📌'} ${cat}</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="budget-amounts"><strong>${formatJPY(spent)}</strong> / ${formatJPY(limit)}</div>
+          <button class="budget-delete" onclick="deleteBudget('${cat}')" title="Remove budget">&times;</button>
+        </div>
+      </div>
+      <div class="budget-bar"><div class="budget-fill ${fillClass}" style="width:${pct}%"></div></div>
+      <div class="budget-footer">
+        <span>${Math.round(pct)}% used</span>
+        ${remaining >= 0
+          ? `<span class="under">${formatJPY(remaining)} left</span>`
+          : `<span class="over">${formatJPY(Math.abs(remaining))} over budget</span>`}
+      </div>
+    </div>`;
+  }).join('');
+
+  const totalRemaining = totalBudget - totalSpent;
+  document.getElementById('budgetSummary').innerHTML = `
+    <div style="font-size:14px;color:#8b949e">Total: <strong style="color:#e1e4e8">${formatJPY(totalSpent)}</strong> / ${formatJPY(totalBudget)}</div>
+    <div style="font-size:16px;font-weight:700;${totalRemaining >= 0 ? 'color:#3fb950' : 'color:#f85149'}">${totalRemaining >= 0 ? formatJPY(totalRemaining) + ' left' : formatJPY(Math.abs(totalRemaining)) + ' over'}</div>
+  `;
+}
+
 // Fetch live USD/JPY rate
 async function fetchLiveRate() {
   const status = document.getElementById('rateStatus');
@@ -920,6 +1045,7 @@ document.getElementById('date').value = new Date().toISOString().split('T')[0];
 setType('income');
 render();
 renderSubs();
+populateBudgetCategories();
 fetchLiveRate();
 </script>
 </body>
