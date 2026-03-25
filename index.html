@@ -98,6 +98,30 @@
   .amount-row select { width: 80px; padding: 10px 8px; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; color: #e1e4e8; font-size: 14px; }
 
   .tx-currency { font-size: 11px; color: #8b949e; }
+
+  /* CSV Import */
+  .import-section { margin-top: 24px; background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px; }
+  .import-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+  .import-controls { display: flex; gap: 8px; align-items: center; }
+  .import-controls select { padding: 8px 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; color: #e1e4e8; font-size: 13px; }
+  .drop-zone { border: 2px dashed #30363d; border-radius: 10px; padding: 32px; text-align: center; cursor: pointer; transition: all 0.2s; }
+  .drop-zone:hover, .drop-zone.dragover { border-color: #58a6ff; background: #0d1117; }
+  .drop-zone p { color: #8b949e; font-size: 14px; margin-bottom: 4px; }
+  .drop-zone small { color: #484f58; font-size: 12px; }
+  .preview-table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 13px; }
+  .preview-table th { text-align: left; padding: 8px; color: #8b949e; border-bottom: 1px solid #30363d; font-weight: 500; }
+  .preview-table td { padding: 8px; border-bottom: 1px solid #21262d; }
+  .preview-table td.income { color: #3fb950; }
+  .preview-table td.expense { color: #f85149; }
+  .preview-actions { display: flex; gap: 8px; margin-top: 16px; }
+  .btn-import { padding: 10px 24px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .btn-import.confirm { background: #238636; color: #fff; }
+  .btn-import.confirm:hover { background: #2ea043; }
+  .btn-import.cancel { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
+  .btn-import.cancel:hover { background: #30363d; }
+  .import-result { margin-top: 12px; padding: 10px 14px; border-radius: 8px; font-size: 13px; }
+  .import-result.success { background: #0f2d1a; color: #3fb950; }
+  .import-result.error { background: #2d1117; color: #f85149; }
 </style>
 </head>
 <body>
@@ -181,6 +205,26 @@
       </div>
     </div>
     <div class="tx-list" id="txList"></div>
+  </div>
+
+  <div class="import-section">
+    <div class="import-header">
+      <h2 style="margin:0">Import CSV</h2>
+      <div class="import-controls">
+        <select id="bankSelect">
+          <option value="rakuten">Rakuten Bank</option>
+          <option value="sofi">SoFi</option>
+          <option value="generic">Generic CSV</option>
+        </select>
+      </div>
+    </div>
+    <div class="drop-zone" id="dropZone" onclick="document.getElementById('csvFile').click()">
+      <p>Drop your CSV file here or click to browse</p>
+      <small>Supports Rakuten Bank &amp; SoFi statement exports</small>
+    </div>
+    <input type="file" id="csvFile" accept=".csv" style="display:none" onchange="handleCSVFile(this.files[0])">
+    <div id="importPreview"></div>
+    <div id="importResult"></div>
   </div>
 </div>
 
@@ -362,6 +406,197 @@ function render() {
     data: { labels: ['Income', 'Expenses'], datasets: [{ data: [totalIncome, totalExpense], backgroundColor: ['#238636', '#da3633'], borderWidth: 0 }] },
     options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { color: '#8b949e', padding: 12 } } } }
   });
+}
+
+// --- CSV Import ---
+let pendingImport = [];
+
+// Drag and drop
+const dropZone = document.getElementById('dropZone');
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('dragover');
+  const file = e.dataTransfer.files[0];
+  if (file && file.name.endsWith('.csv')) handleCSVFile(file);
+});
+
+function handleCSVFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    const bank = document.getElementById('bankSelect').value;
+    try {
+      pendingImport = parseCSV(e.target.result, bank);
+      showPreview(pendingImport);
+    } catch (err) {
+      showImportResult('Error parsing CSV: ' + err.message, 'error');
+    }
+  };
+  // Rakuten Bank CSVs are Shift_JIS encoded
+  const bank = document.getElementById('bankSelect').value;
+  if (bank === 'rakuten') {
+    reader.readAsText(file, 'Shift_JIS');
+  } else {
+    reader.readAsText(file, 'UTF-8');
+  }
+}
+
+function parseCSV(text, bank) {
+  const lines = text.trim().split('\n').map(l => l.trim()).filter(l => l);
+  if (bank === 'rakuten') return parseRakuten(lines);
+  if (bank === 'sofi') return parseSoFi(lines);
+  return parseGeneric(lines);
+}
+
+function parseRakuten(lines) {
+  // Rakuten Bank CSV: 取引日,入出金(税込),残高,摘要
+  // Date format: YYYYMMDD, amount can be negative (withdrawal) or positive (deposit)
+  const results = [];
+  for (let i = 0; i < lines.length; i++) {
+    const cols = lines[i].split(',');
+    if (cols.length < 4) continue;
+    const dateStr = cols[0].replace(/"/g, '').trim();
+    // Skip header row
+    if (dateStr === '取引日' || !/^\d{8}$/.test(dateStr)) continue;
+    const date = dateStr.slice(0,4) + '-' + dateStr.slice(4,6) + '-' + dateStr.slice(6,8);
+    const rawAmount = parseInt(cols[1].replace(/"/g, '').replace(/,/g, '').trim(), 10);
+    if (isNaN(rawAmount) || rawAmount === 0) continue;
+    const desc = cols[3].replace(/"/g, '').trim();
+    results.push({
+      date, desc,
+      amount: Math.abs(rawAmount),
+      type: rawAmount > 0 ? 'income' : 'expense',
+      currency: 'JPY',
+      category: rawAmount > 0 ? 'Other Income' : 'Other'
+    });
+  }
+  return results;
+}
+
+function parseSoFi(lines) {
+  // SoFi CSV: Date,Description,Amount,Type (or similar)
+  // Find header row first
+  const results = [];
+  let headerIdx = -1;
+  let colMap = {};
+  for (let i = 0; i < lines.length; i++) {
+    const lower = lines[i].toLowerCase();
+    if (lower.includes('date') && lower.includes('description') && lower.includes('amount')) {
+      headerIdx = i;
+      const headers = splitCSVLine(lines[i]).map(h => h.toLowerCase().trim());
+      headers.forEach((h, j) => {
+        if (h.includes('date')) colMap.date = j;
+        if (h.includes('description') || h.includes('name')) colMap.desc = j;
+        if (h.includes('amount')) colMap.amount = j;
+        if (h.includes('type') || h.includes('category')) colMap.type = j;
+      });
+      break;
+    }
+  }
+  if (headerIdx === -1) throw new Error('Could not find CSV header row. Expected: Date, Description, Amount');
+  for (let i = headerIdx + 1; i < lines.length; i++) {
+    const cols = splitCSVLine(lines[i]);
+    if (cols.length < 3) continue;
+    const rawDate = cols[colMap.date]?.trim();
+    if (!rawDate) continue;
+    // Parse date: MM/DD/YYYY or YYYY-MM-DD
+    let date;
+    if (rawDate.includes('/')) {
+      const parts = rawDate.split('/');
+      date = parts[2] + '-' + parts[0].padStart(2,'0') + '-' + parts[1].padStart(2,'0');
+    } else {
+      date = rawDate;
+    }
+    const rawAmount = parseFloat(cols[colMap.amount]?.replace(/[$,]/g, '').trim());
+    if (isNaN(rawAmount) || rawAmount === 0) continue;
+    const desc = cols[colMap.desc]?.trim() || 'Unknown';
+    results.push({
+      date, desc,
+      amount: Math.abs(rawAmount),
+      type: rawAmount > 0 ? 'income' : 'expense',
+      currency: 'USD',
+      category: rawAmount > 0 ? 'Other Income' : 'Other'
+    });
+  }
+  return results;
+}
+
+function parseGeneric(lines) {
+  // Try to auto-detect: look for header with date, description/name, amount
+  return parseSoFi(lines); // same logic works for most generic CSVs
+}
+
+function splitCSVLine(line) {
+  const result = [];
+  let current = '';
+  let inQuotes = false;
+  for (const ch of line) {
+    if (ch === '"') { inQuotes = !inQuotes; }
+    else if (ch === ',' && !inQuotes) { result.push(current); current = ''; }
+    else { current += ch; }
+  }
+  result.push(current);
+  return result;
+}
+
+function showPreview(items) {
+  if (items.length === 0) {
+    showImportResult('No transactions found in the CSV file.', 'error');
+    return;
+  }
+  const incomeCount = items.filter(t => t.type === 'income').length;
+  const expenseCount = items.filter(t => t.type === 'expense').length;
+  const preview = document.getElementById('importPreview');
+  const showItems = items.slice(0, 10);
+  preview.innerHTML = `
+    <table class="preview-table">
+      <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Type</th></tr></thead>
+      <tbody>
+        ${showItems.map(t => `
+          <tr>
+            <td>${t.date}</td>
+            <td>${t.desc}</td>
+            <td class="${t.type}">${t.type === 'income' ? '+' : '-'}${formatOriginal(t.amount, t.currency)}</td>
+            <td>${t.type}</td>
+          </tr>
+        `).join('')}
+        ${items.length > 10 ? `<tr><td colspan="4" style="color:#8b949e; text-align:center">...and ${items.length - 10} more</td></tr>` : ''}
+      </tbody>
+    </table>
+    <div style="margin-top:12px; color:#8b949e; font-size:13px">
+      Found <strong>${items.length}</strong> transactions: ${incomeCount} income, ${expenseCount} expenses
+    </div>
+    <div class="preview-actions">
+      <button class="btn-import confirm" onclick="confirmImport()">Import ${items.length} transactions</button>
+      <button class="btn-import cancel" onclick="cancelImport()">Cancel</button>
+    </div>
+  `;
+}
+
+function confirmImport() {
+  const count = pendingImport.length;
+  pendingImport.forEach(t => {
+    transactions.push({ id: Date.now() + Math.random(), ...t });
+  });
+  save();
+  pendingImport = [];
+  document.getElementById('importPreview').innerHTML = '';
+  document.getElementById('csvFile').value = '';
+  render();
+  showImportResult(`Successfully imported ${count} transactions.`, 'success');
+}
+
+function cancelImport() {
+  pendingImport = [];
+  document.getElementById('importPreview').innerHTML = '';
+  document.getElementById('csvFile').value = '';
+  document.getElementById('importResult').innerHTML = '';
+}
+
+function showImportResult(msg, type) {
+  document.getElementById('importResult').innerHTML = `<div class="import-result ${type}">${msg}</div>`;
+  setTimeout(() => { document.getElementById('importResult').innerHTML = ''; }, 5000);
 }
 
 // Fetch live USD/JPY rate
