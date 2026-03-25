@@ -342,6 +342,7 @@
     <div style="margin-bottom:12px; display:flex; align-items:center; gap:8px;">
       <input type="password" id="geminiKey" placeholder="Gemini API key (for auto-categorize)" style="flex:1; padding:8px 12px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; font-size:13px;">
       <button onclick="saveGeminiKey()" style="padding:8px 14px; background:#238636; border:none; border-radius:6px; color:#fff; font-size:13px; cursor:pointer; white-space:nowrap;">Save Key</button>
+      <span id="geminiStatus" style="font-size:12px;"></span>
       <a href="https://aistudio.google.com/apikey" target="_blank" style="font-size:12px; color:#58a6ff; white-space:nowrap;">Get free key</a>
     </div>
     <div class="drop-zone" id="dropZone" onclick="document.getElementById('csvFile').click()">
@@ -440,10 +441,7 @@ let currentType = 'income';
 let viewDate = new Date();
 
 // Show saved Gemini key status
-if (localStorage.getItem('finance_gemini_key')) {
-  const ki = document.getElementById('geminiKey');
-  if (ki) { ki.placeholder = 'Key saved! Auto-categorize enabled.'; }
-}
+updateGeminiStatus();
 
 function getRate() { return parseFloat(localStorage.getItem('finance_usd_jpy') || '150'); }
 function saveRate() { localStorage.setItem('finance_usd_jpy', document.getElementById('exchangeRate').value); }
@@ -913,7 +911,16 @@ function saveGeminiKey() {
   if (key) {
     localStorage.setItem('finance_gemini_key', key);
     document.getElementById('geminiKey').value = '';
-    document.getElementById('geminiKey').placeholder = 'Key saved! Auto-categorize enabled.';
+    updateGeminiStatus();
+  }
+}
+function updateGeminiStatus() {
+  const el = document.getElementById('geminiStatus');
+  if (!el) return;
+  if (localStorage.getItem('finance_gemini_key')) {
+    el.innerHTML = '<span style="color:#3fb950;">Key saved</span>';
+  } else {
+    el.innerHTML = '';
   }
 }
 
@@ -940,6 +947,11 @@ ${descs}`;
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
     });
+    if (!resp.ok) {
+      const errText = await resp.text();
+      showImportResult(`Gemini API error (${resp.status}): ${errText.slice(0, 100)}`, 'error');
+      return items;
+    }
     const data = await resp.json();
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     const match = text.match(/\[[\s\S]*\]/);
@@ -951,9 +963,11 @@ ${descs}`;
           t._confident = typeof cats[i].confident === 'boolean' ? cats[i].confident : true;
         }
       });
+    } else {
+      showImportResult('Gemini returned unexpected format. Showing uncategorized.', 'error');
     }
   } catch (e) {
-    console.warn('Gemini categorization failed:', e);
+    showImportResult('Gemini categorization failed: ' + e.message, 'error');
   }
   return items;
 }
