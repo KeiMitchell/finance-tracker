@@ -428,13 +428,13 @@ sb && sb.auth.onAuthStateChange(async (event, session) => {
 
 // --- Data ---
 const INCOME_CATEGORIES = ['Salary', 'Freelance', 'Investment', 'Side Hustle', 'Gift', 'Refund', 'Other Income'];
-const EXPENSE_CATEGORIES = ['Rent/Housing', 'Groceries', 'Dining Out', 'Transport', 'Utilities', 'Subscriptions', 'Shopping', 'Entertainment', 'Health', 'Insurance', 'Education', 'Travel', 'Gifts', 'Savings', 'Credit Card Payment', 'Other'];
+const EXPENSE_CATEGORIES = ['Rent/Housing', 'Groceries', 'Dining Out', 'Transport', 'Utilities', 'Subscriptions', 'Shopping', 'Entertainment', 'Health', 'Insurance', 'Education', 'Travel', 'Business', 'Gifts', 'Savings', 'Credit Card Payment', 'Fees', 'Other'];
 const TRANSFER_CATEGORIES = ['Credit Card Payment'];
 const CATEGORY_ICONS = {
   'Salary': '💰', 'Freelance': '💻', 'Investment': '📈', 'Side Hustle': '🔧', 'Gift': '🎁', 'Refund': '↩️', 'Other Income': '💵',
   'Rent/Housing': '🏠', 'Groceries': '🛒', 'Dining Out': '🍽️', 'Transport': '🚗', 'Utilities': '⚡', 'Subscriptions': '📱',
   'Shopping': '🛍️', 'Entertainment': '🎬', 'Health': '💊', 'Insurance': '🛡️', 'Education': '📚', 'Travel': '✈️',
-  'Gifts': '🎁', 'Savings': '🏦', 'Credit Card Payment': '💳', 'Other': '📌'
+  'Business': '💼', 'Gifts': '🎁', 'Savings': '🏦', 'Credit Card Payment': '💳', 'Fees': '🏦', 'Other': '📌'
 };
 const CATEGORY_COLORS = ['#58a6ff','#3fb950','#f0883e','#bc8cff','#f85149','#39d2c0','#db61a2','#e3b341','#8b949e','#79c0ff','#56d364','#d2a8ff','#ff7b72','#a5d6ff','#7ee787'];
 
@@ -1009,23 +1009,106 @@ async function recategorizeAll() {
 }
 
 const LOCAL_CATEGORY_RULES = [
-  [/spotify|netflix|youtube|disney|hulu|amazon prime|apple music|newspicks|chatwork|github|figma|claude|anthropic|openai|gpt|rize|workspace|subscription/i, 'Subscriptions'],
-  [/uber eats|ubereats|doordash|grubhub|出前|デリバリー/i, 'Dining Out'],
-  [/starbucks|coffee|café|カフェ|珈琲|roastery|eatune/i, 'Dining Out'],
-  [/restaurant|レストラン|食堂|居酒屋|焼肉|寿司|ラーメン|dining|バー/i, 'Dining Out'],
-  [/suica|pasmo|jr |metro|railway|航空|airline|ana |jal |新幹線|タクシー|taxi|uber(?! eats)|バス|鉄道|交通/i, 'Transport'],
-  [/amazon(?! prime| web)|楽天市場|yahoo.*shop|mercari|メルカリ|shopping|mall|マート|百貨店|ヨドバシ|ビック/i, 'Shopping'],
-  [/スーパー|grocery|セイコーマート|ライフ|イオン|西友|成城石井|コンビニ|セブン|ファミリー|ローソン|miniストップ/i, 'Groceries'],
-  [/clinic|クリニック|hospital|病院|pharmacy|薬局|医療|dental|歯科|health/i, 'Health'],
-  [/hotel|booking\.com|airbnb|travel|旅行|航空券|expedia/i, 'Travel'],
-  [/aws|web services|heroku|vercel|gcloud|cloud/i, 'Subscriptions'],
-  [/insurance|保険/i, 'Insurance'],
-  [/school|university|大学|学校|udemy|coursera|p\.skool/i, 'Education'],
-  [/rent|家賃|管理費|housing/i, 'Rent/Housing'],
-  [/electric|gas|water|電気|ガス|水道|utility|ドコモ|softbank|au |通信/i, 'Utilities'],
-  [/gym|fitness|yoga|pilates|ジム|フィットネス/i, 'Health'],
-  [/salary|給与|給料/i, 'Salary'],
+  // --- Business (SaaS, dev tools, coworking, professional services) ---
+  [/anthropic|claude\.ai/i, 'Business'],
+  [/openai|chatgpt/i, 'Business'],
+  [/github|figma|notion|slack|asana|trello|linear|miro/i, 'Business'],
+  [/aws|amazon web services|heroku|vercel|gcloud|google cloud|digitalocean|cloudflare/i, 'Business'],
+  [/google\s?\*\s?workspace|gethanjo/i, 'Business'],
+  [/chatwork|zoom\s|microsoft\s365|office\s365/i, 'Business'],
+  [/rize |wework|regus|coworking|コワーキング|オフィスサポ/i, 'Business'],
+  [/domain|ドメイン|hosting|サーバー|ssl/i, 'Business'],
+  [/adobe|canva|photoshop|illustrator/i, 'Business'],
+  [/stripe|square |paypal(?!\s\*sp)/i, 'Business'],
+  [/genspark|cursor|copilot|replit|railway\.app/i, 'Business'],
+  [/p\.skool|skool\.com/i, 'Business'],
+  [/advertising|広告|meta ads|facebook ads|google ads/i, 'Business'],
+  [/consulting|コンサルティング|税理士|会計士|弁護士|司法書士/i, 'Business'],
+  [/印刷|名刺|封筒|printing/i, 'Business'],
+  [/conference|カンファレンス|セミナー|summit/i, 'Business'],
+
+  // --- Subscriptions (personal entertainment/media/apps) ---
+  [/spotify|netflix|youtube.*premium|disney\+|hulu|amazon prime|apple music|apple tv|audible/i, 'Subscriptions'],
+  [/newspicks|nikkei|日経|wsj|medium|substack/i, 'Subscriptions'],
+  [/superchinese|duolingo|language.*app/i, 'Subscriptions'],
+  [/icloud|google one|dropbox|1password|lastpass|nordvpn|expressvpn/i, 'Subscriptions'],
+  [/subscription/i, 'Subscriptions'],
+
+  // --- Dining Out ---
+  [/uber eats|ubereats|doordash|grubhub|出前館|demaecan|デリバリー|wolt|menu /i, 'Dining Out'],
+  [/starbucks|スターバックス|coffee|café|カフェ|珈琲|roastery|ドトール|タリーズ|コメダ|喫茶/i, 'Dining Out'],
+  [/restaurant|レストラン|食堂|居酒屋|焼肉|寿司|すし|ラーメン|そば|うどん|丼|定食|弁当/i, 'Dining Out'],
+  [/dining|バー|bar |izakaya|焼鳥|串|鳥|牛|豚|魚|鮨|天ぷら|tempura/i, 'Dining Out'],
+  [/マクドナルド|mcdonald|mos burger|モスバーガー|吉野家|松屋|すき家|なか卯|coco壱/i, 'Dining Out'],
+  [/eatune|yukinoshita/i, 'Dining Out'],
+  [/ノート\s.*\s.*田/i, 'Dining Out'],
+
+  // --- Groceries ---
+  [/スーパー|grocery|セイコーマート|ライフ|イオン|西友|成城石井|まいばすけっと|マルエツ|ok\sストア/i, 'Groceries'],
+  [/コンビニ|セブン|ファミリーマート|ローソン|ミニストップ|デイリーヤマザキ/i, 'Groceries'],
+  [/肉屋|八百屋|魚屋|パン屋|ベーカリー|bakery|market/i, 'Groceries'],
+
+  // --- Transport ---
+  [/suica|pasmo|icoca|jr |metro|railway|鉄道|電車|地下鉄/i, 'Transport'],
+  [/航空|airline|ana\s|jal\s|peach|jetstar|skymark|スカイマーク|全日空/i, 'Transport'],
+  [/新幹線|タクシー|taxi|uber(?!\s?eats)|grab|lyft|didi/i, 'Transport'],
+  [/バス|bus |高速|駐車|parking|ガソリン|gasoline|eneos|出光|シェル/i, 'Transport'],
+  [/レンタカー|car rental|times|カーシェア/i, 'Transport'],
+  [/ゴーゴー|go go|etcマイレージ|etc |通行料|toll/i, 'Transport'],
+  [/citation permits/i, 'Transport'],
+
+  // --- Shopping ---
+  [/amazon(?!\s*(prime|web|music))|アマゾン(?!.*サービシーズ)/i, 'Shopping'],
+  [/楽天市場|yahoo.*shop|mercari|メルカリ|ヤフオク|zozotown|ユニクロ|uniqlo|gu\s|無印|muji/i, 'Shopping'],
+  [/百貨店|伊勢丹|三越|高島屋|大丸|阪急|マルイ|丸井/i, 'Shopping'],
+  [/ヨドバシ|ビックカメラ|ヤマダ電機|ケーズデンキ|electronics/i, 'Shopping'],
+  [/ニトリ|ikea|franc franc|家具|furniture/i, 'Shopping'],
+  [/don quijote|ドン・キホーテ|ドンキ|loft|ハンズ|東急ハンズ/i, 'Shopping'],
+
+  // --- Entertainment ---
+  [/cinema|映画|toho|ユナイテッド|movie|theatre|theater|劇場/i, 'Entertainment'],
+  [/concert|コンサート|ライブ|live|チケット|ticket|hardsummer|festival|fes\s/i, 'Entertainment'],
+  [/game|ゲーム|playstation|nintendo|steam|xbox|app store|google play/i, 'Entertainment'],
+  [/カラオケ|karaoke|ボウリング|bowling|ゴルフ|golf|テニス|tennis/i, 'Entertainment'],
+  [/遊園地|テーマパーク|水族館|動物園|美術館|博物館|museum/i, 'Entertainment'],
+  [/manga|漫画|書店|本屋|bookstore|kindle|books/i, 'Entertainment'],
+
+  // --- Health ---
+  [/clinic|クリニック|hospital|病院|pharmacy|薬局|マツモトキヨシ|ウエルシア/i, 'Health'],
+  [/医療|dental|歯科|歯医者|整形|皮膚科|眼科|内科|外科/i, 'Health'],
+  [/gym|fitness|yoga|pilates|ジム|フィットネス|パーソナル|トレーニング/i, 'Health'],
+  [/サプリ|supplement|vitamin|プロテイン|protein/i, 'Health'],
+  [/美容院|美容室|hair|ヘア|barber|理容|理髪/i, 'Health'],
+
+  // --- Travel ---
+  [/hotel|ホテル|booking\.com|airbnb|agoda|expedia|じゃらん|一休/i, 'Travel'],
+  [/旅行|travel|旅館|ryokan|民宿|ゲストハウス|hostel/i, 'Travel'],
+
+  // --- Education ---
+  [/school|university|大学|学校|udemy|coursera|skillshare|学費|tuition/i, 'Education'],
+  [/教材|textbook|講座|レッスン|lesson|tutoring|塾|予備校/i, 'Education'],
+
+  // --- Utilities ---
+  [/electric|gas|water|電気|ガス|水道|utility|光熱/i, 'Utilities'],
+  [/ドコモ|docomo|softbank|ソフトバンク|au\s|kddi|楽天モバイル|ahamo|povo|linemo|通信|携帯|phone/i, 'Utilities'],
+  [/internet|インターネット|wifi|wi-fi|nuro|flets|フレッツ|ntt/i, 'Utilities'],
+
+  // --- Rent/Housing ---
+  [/rent|家賃|管理費|housing|不動産|賃貸|共益費/i, 'Rent/Housing'],
+
+  // --- Insurance ---
+  [/insurance|保険|損保|生保|hoken/i, 'Insurance'],
+
+  // --- Fees (card fees, bank fees, interest) ---
+  [/ペイフレックス|手数料|fee|interest|利息|年会費|annual/i, 'Fees'],
+  [/atm|振込手数料|transfer fee/i, 'Fees'],
+
+  // --- Transfers ---
   [/口座振替/i, 'Credit Card Payment'],
+
+  // --- Income ---
+  [/salary|給与|給料|報酬/i, 'Salary'],
+  [/refund|返金|返品|キャンセル/i, 'Refund'],
 ];
 
 function categorizeLocal(item) {
