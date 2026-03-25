@@ -441,6 +441,9 @@ let transactions = JSON.parse(localStorage.getItem('finance_tx') || '[]');
 let currentType = 'income';
 let viewDate = new Date();
 
+// Set default date to today
+document.getElementById('date').value = new Date().toISOString().slice(0, 10);
+
 // Show saved Gemini key status
 updateGeminiStatus();
 
@@ -544,16 +547,23 @@ async function addTransaction() {
 
   const tx = { id: Date.now(), type: currentType, desc, amount, category, date, currency };
 
-  if (currentUser) {
-    const dbRow = await insertToSupabase(tx);
-    if (dbRow) tx.id = dbRow.id;
-  }
-
+  // Save locally first so UI updates immediately
   transactions.push(tx);
   saveLocal();
   document.getElementById('desc').value = '';
   document.getElementById('amount').value = '';
   render();
+
+  // Sync to Supabase in background
+  if (currentUser) {
+    insertToSupabase(tx).then(dbRow => {
+      if (dbRow) {
+        const found = transactions.find(t => t.id === tx.id);
+        if (found) found.id = dbRow.id;
+        saveLocal();
+      }
+    });
+  }
 }
 
 async function deleteTransaction(id) {
@@ -932,7 +942,7 @@ async function saveGeminiKey() {
   const el = document.getElementById('geminiStatus');
   el.innerHTML = '<span style="color:#e3b341;">Testing...</span>';
   try {
-    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`, {
+    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${key}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contents: [{ parts: [{ text: 'Reply with just: ok' }] }] })
@@ -995,23 +1005,27 @@ async function categorizeWithGemini(items) {
 
   const expCats = EXPENSE_CATEGORIES.join(', ');
   const incCats = INCOME_CATEGORIES.join(', ');
-  const descs = items.map((t, i) => `${i}. [${t.type}] ${t.desc} (${t.currency} ${t.amount})`).join('\n');
+  const descs = items.map((t, i) => `${i}. [${t.type}] ${t.desc}`).join('\n');
 
-  const prompt = `Categorize these transactions. For expenses use ONLY: ${expCats}. For income use ONLY: ${incCats}.
-
-Reply with ONLY a JSON array of objects, one per transaction, in order:
-[{"category": "...", "confident": true/false}, ...]
-
-Set "confident": false if the description is ambiguous, garbled, or could fit multiple categories. Set true if obvious (e.g. SPOTIFY → Subscriptions).
+  const prompt = `Categorize these ${items.length} transactions. Expenses: ${expCats}. Income: ${incCats}.
+Reply ONLY with a JSON array: [{"c":"category","ok":true/false},...]
+"ok":false if unsure.
 
 ${descs}`;
 
   try {
-    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+      signal: controller.signal,
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0, maxOutputTokens: 2048 }
+      })
     });
+    clearTimeout(timeout);
     if (!resp.ok) {
       const errText = await resp.text();
       showImportResult(`Gemini API error (${resp.status}): ${errText.slice(0, 100)}`, 'error');
@@ -1024,8 +1038,8 @@ ${descs}`;
       const cats = JSON.parse(match[0]);
       items.forEach((t, i) => {
         if (cats[i]) {
-          t.category = cats[i].category || cats[i];
-          t._confident = typeof cats[i].confident === 'boolean' ? cats[i].confident : true;
+          t.category = cats[i].c || cats[i].category || cats[i];
+          t._confident = cats[i].ok !== undefined ? cats[i].ok : (typeof cats[i].confident === 'boolean' ? cats[i].confident : true);
         }
       });
     } else {
