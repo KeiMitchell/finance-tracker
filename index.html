@@ -1051,27 +1051,17 @@ ${descs}`;
   return items;
 }
 
-async function showPreview(items) {
+async function showPreview(items, skipAI) {
   if (items.length === 0) {
     showImportResult('No transactions found in the CSV file.', 'error');
     return;
   }
 
-  // Auto-categorize if Gemini key is set
+  // Show preview immediately, run Gemini in background
   const hasKey = !!localStorage.getItem('finance_gemini_key');
-  let geminiWorked = false;
-  if (hasKey) {
-    showImportResult('Categorizing transactions with AI...', 'success');
-    await categorizeWithGemini(items);
-    geminiWorked = items.some(t => t._confident !== undefined);
-    if (geminiWorked) {
-      document.getElementById('importResult').innerHTML = '';
-    }
-    // If not geminiWorked, error message from categorizeWithGemini stays visible
-  }
 
-  const unsure = items.filter(t => t._confident === false);
-  const sure = items.filter(t => t._confident !== false);
+  const unsure = [];
+  const sure = [];
   const preview = document.getElementById('importPreview');
   const allCats = [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES];
 
@@ -1147,23 +1137,51 @@ async function showPreview(items) {
     </div>
   `;
   preview.innerHTML = html;
+
+  // Run Gemini categorization in background after preview is shown
+  if (hasKey && !skipAI) {
+    const needsCategorization = items.filter(t => t.category === 'Other' || t.category === 'Other Income');
+    if (needsCategorization.length > 0) {
+      showImportResult(`Categorizing ${needsCategorization.length} transactions with AI...`, 'success');
+      categorizeWithGemini(needsCategorization).then(() => {
+        document.getElementById('importResult').innerHTML = '';
+        showPreview(items, true);
+      });
+    }
+  }
+}
+
+function isDuplicate(t) {
+  return transactions.some(existing =>
+    existing.date === t.date &&
+    existing.desc === t.desc &&
+    Math.abs(existing.amount - t.amount) < 0.01
+  );
 }
 
 async function confirmImport() {
   const count = pendingImport.length;
   if (count === 0) { showImportResult('No transactions to import.', 'error'); return; }
 
-  // Always save locally — simple and reliable
+  // Filter out duplicates
+  let skipped = 0;
+  const newItems = [];
   pendingImport.forEach(t => {
     const { _confident, ...clean } = t;
-    transactions.push({ id: Date.now() + Math.random(), ...clean });
+    if (isDuplicate(clean)) {
+      skipped++;
+    } else {
+      newItems.push({ id: Date.now() + Math.random(), ...clean });
+    }
   });
+
+  newItems.forEach(t => transactions.push(t));
 
   saveLocal();
 
   // Also try Supabase if logged in (non-blocking)
-  if (currentUser) {
-    const rows = pendingImport.map(t => ({
+  if (currentUser && newItems.length > 0) {
+    const rows = newItems.map(t => ({
       user_id: currentUser.id,
       type: t.type,
       description: t.desc,
@@ -1181,7 +1199,10 @@ async function confirmImport() {
   document.getElementById('importPreview').innerHTML = '';
   document.getElementById('csvFile').value = '';
   render();
-  showImportResult(`Successfully imported ${count} transactions.`, 'success');
+  const msg = skipped > 0
+    ? `Imported ${newItems.length} transactions. Skipped ${skipped} duplicates.`
+    : `Successfully imported ${newItems.length} transactions.`;
+  showImportResult(msg, 'success');
 }
 
 function cancelImport() {
