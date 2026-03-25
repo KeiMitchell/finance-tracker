@@ -985,19 +985,19 @@ async function recategorizeAll() {
   }
 
   await categorizeWithGemini(uncategorized);
-  // Clean _confident from transactions
   uncategorized.forEach(t => delete t._confident);
 
   saveLocal();
-  if (currentUser) {
-    // Update categories in Supabase
-    for (const t of uncategorized) {
-      await sb.from('transactions').update({ category: t.category }).eq('id', t.id);
-    }
-  }
   render();
   btn.textContent = 'AI Categorize';
   btn.disabled = false;
+
+  // Sync to Supabase in background (non-blocking)
+  if (currentUser) {
+    Promise.all(uncategorized.map(t =>
+      sb.from('transactions').update({ category: t.category }).eq('id', t.id)
+    )).catch(e => console.warn('Supabase sync failed:', e));
+  }
 }
 
 async function categorizeWithGemini(items) {
