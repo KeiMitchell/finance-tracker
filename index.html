@@ -784,57 +784,53 @@ function parseSoFi(lines) {
 }
 
 function parseAmex(lines) {
-  // AMEX Japan CSV (Shift-JIS): 利用日,データ処理日,利用先,金額,外国通貨利用金額,換算レート
-  // AMEX US CSV: Date, Description, Amount (or Date, Reference, Amount, Description)
+  // AMEX Japan CSV (Shift-JIS): ご利用日,データ処理日,ご利用内容,金額,海外通貨利用金額,換算レート
+  // AMEX US CSV: Date, Description, Amount
   const results = [];
-  let headerIdx = -1;
   let colMap = {};
   let isJapanese = false;
+  let startIdx = 0;
+
+  // Strategy: skip any non-data rows, detect format from actual data lines
+  // Find first line that starts with a date pattern
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    // Japanese AMEX header detection
-    if (line.includes('利用') && line.includes('金額')) {
-      headerIdx = i;
+    const cols = splitCSVLine(lines[i]);
+    const first = cols[0]?.trim() || '';
+    // YYYY/MM/DD = Japanese AMEX data row
+    if (first.match(/^\d{4}\/\d{2}\/\d{2}$/)) {
       isJapanese = true;
       colMap = { date: 0, desc: 2, amount: 3, foreignAmount: 4, rate: 5 };
+      startIdx = i;
       break;
     }
-    // English AMEX header detection
-    const lower = line.toLowerCase();
+    // MM/DD/YYYY or MM/DD/YY = US AMEX data row
+    if (first.match(/^\d{1,2}\/\d{1,2}\/\d{2,4}$/)) {
+      colMap = { date: 0, desc: 1, amount: 2 };
+      startIdx = i;
+      break;
+    }
+    // Check for English header row
+    const lower = lines[i].toLowerCase();
     if (lower.includes('date') && lower.includes('amount')) {
-      headerIdx = i;
-      const headers = splitCSVLine(line).map(h => h.toLowerCase().trim());
+      const headers = splitCSVLine(lines[i]).map(h => h.toLowerCase().trim());
       headers.forEach((h, j) => {
         if (h === 'date') colMap.date = j;
         if (h.includes('description') || h === 'payee') colMap.desc = j;
         if (h === 'amount') colMap.amount = j;
-        if (h === 'category') colMap.category = j;
       });
       if (colMap.desc === undefined) colMap.desc = 1;
+      startIdx = i + 1;
       break;
     }
   }
-  // If no header found, detect format from first data line
-  const startIdx = headerIdx === -1 ? 0 : headerIdx + 1;
-  if (headerIdx === -1) {
-    const firstCols = splitCSVLine(lines[0] || '');
-    const firstDate = firstCols[0]?.trim() || '';
-    // Japanese format: YYYY/MM/DD with 6 columns
-    if (firstDate.match(/^\d{4}\/\d{2}\/\d{2}$/) && firstCols.length >= 4) {
-      isJapanese = true;
-      colMap = { date: 0, desc: 2, amount: 3, foreignAmount: 4, rate: 5 };
-    } else {
-      colMap = { date: 0, desc: 1, amount: 2 };
-    }
-  }
+
   for (let i = startIdx; i < lines.length; i++) {
     const cols = splitCSVLine(lines[i]);
     if (cols.length < 3) continue;
     const rawDate = cols[colMap.date]?.trim();
     if (!rawDate) continue;
     let date;
-    if (isJapanese && rawDate.match(/^\d{4}\/\d{2}\/\d{2}$/)) {
-      // YYYY/MM/DD → YYYY-MM-DD
+    if (rawDate.match(/^\d{4}\/\d{2}\/\d{2}$/)) {
       date = rawDate.replace(/\//g, '-');
     } else if (rawDate.includes('/')) {
       const parts = rawDate.split('/');
@@ -842,6 +838,8 @@ function parseAmex(lines) {
         date = parts[0] + '-' + parts[1].padStart(2,'0') + '-' + parts[2].padStart(2,'0');
       } else if (parts[2]?.length === 4) {
         date = parts[2] + '-' + parts[0].padStart(2,'0') + '-' + parts[1].padStart(2,'0');
+      } else if (parts[2]?.length === 2) {
+        date = '20' + parts[2] + '-' + parts[0].padStart(2,'0') + '-' + parts[1].padStart(2,'0');
       } else {
         date = rawDate;
       }
@@ -851,12 +849,7 @@ function parseAmex(lines) {
     const rawAmount = parseFloat(cols[colMap.amount]?.replace(/[$,]/g, '').trim());
     if (isNaN(rawAmount) || rawAmount === 0) continue;
     const desc = cols[colMap.desc]?.trim() || 'AMEX Transaction';
-    // Detect currency: if foreign amount column has value, it's foreign currency
     let currency = isJapanese ? 'JPY' : 'USD';
-    if (isJapanese && colMap.foreignAmount !== undefined) {
-      const foreignStr = cols[colMap.foreignAmount]?.trim() || '';
-      if (foreignStr && foreignStr.includes('USD')) currency = 'JPY'; // billed in JPY even if foreign
-    }
     // AMEX: positive = charge (expense), negative = payment/credit (income/refund)
     results.push({
       date, desc,
