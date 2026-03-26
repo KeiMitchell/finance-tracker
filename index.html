@@ -312,7 +312,9 @@
       </select>
       <input type="date" id="subNextDate">
       <button class="btn-add-sub" onclick="addSubscription()">+ Add</button>
+      <button class="btn-add-sub" onclick="autoDetectSubscriptions()" style="background:#1f6feb;">Auto-detect from history</button>
     </div>
+    <div id="subDetected" style="display:none;"></div>
     <div class="sub-list" id="subList"></div>
     <div class="sub-total" id="subTotal"></div>
   </div>
@@ -1598,6 +1600,121 @@ function renderSubs() {
     <div class="sub-total-label">Monthly total: <strong>${formatJPY(totalMonthly)}</strong></div>
     <div class="sub-total-value">${formatJPY(totalYearly)}/yr</div>
   `;
+}
+
+// --- Auto-detect Subscriptions ---
+function autoDetectSubscriptions() {
+  const descCounts = {};
+  transactions.forEach(t => {
+    if (t.type !== 'expense') return;
+    const key = t.desc.toLowerCase().trim();
+    if (!descCounts[key]) descCounts[key] = { desc: t.desc, months: new Set(), amounts: [], currency: t.currency || 'JPY', category: t.category, dates: [] };
+    descCounts[key].months.add(t.date.slice(0, 7));
+    descCounts[key].amounts.push(t.amount);
+    descCounts[key].dates.push(t.date);
+  });
+
+  // Find recurring: appears in 2+ different months with consistent amounts
+  const existingNames = new Set(subscriptions.map(s => s.name.toLowerCase().trim()));
+  const candidates = Object.values(descCounts)
+    .filter(d => d.months.size >= 2)
+    .filter(d => !existingNames.has(d.desc.toLowerCase().trim()))
+    .map(d => {
+      const avg = d.amounts.reduce((s, a) => s + a, 0) / d.amounts.length;
+      const variance = d.amounts.reduce((s, a) => s + Math.pow(a - avg, 2), 0) / d.amounts.length;
+      const stdDev = Math.sqrt(variance);
+      const consistent = stdDev / avg < 0.15; // <15% variation = likely subscription
+      // Guess cycle from frequency
+      const sortedDates = d.dates.sort();
+      const lastDate = sortedDates[sortedDates.length - 1];
+      // Guess sub category from transaction category/name
+      const subCat = guessSubCategory(d.desc, d.category);
+      return { ...d, avg: Math.round(avg), consistent, subCat, lastDate };
+    })
+    .filter(d => d.consistent)
+    .sort((a, b) => b.months.size - a.months.size);
+
+  const el = document.getElementById('subDetected');
+  if (candidates.length === 0) {
+    el.style.display = 'block';
+    el.innerHTML = '<div style="padding:12px;color:#8b949e;font-size:13px;">No new recurring payments detected. Need 2+ months of history with consistent amounts.</div>';
+    setTimeout(() => { el.style.display = 'none'; }, 3000);
+    return;
+  }
+
+  el.style.display = 'block';
+  el.innerHTML = `
+    <div style="background:#161b22;border:1px solid #1f6feb;border-radius:8px;padding:12px;margin:8px 0;font-size:13px;">
+      <div style="color:#58a6ff;font-weight:600;margin-bottom:8px;">Detected ${candidates.length} recurring payment${candidates.length > 1 ? 's' : ''}</div>
+      ${candidates.map((c, i) => `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-top:1px solid #21262d;" id="detected_${i}">
+          <div>
+            <span style="color:#c9d1d9;">${c.desc}</span>
+            <span style="color:#8b949e;"> — ${c.currency === 'USD' ? '$' + c.avg.toLocaleString() : '¥' + c.avg.toLocaleString()} · ${c.months.size} months · ${c.subCat}</span>
+          </div>
+          <div>
+            <button onclick="acceptDetected(${i})" style="padding:3px 10px;background:#238636;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:12px;margin-left:6px;">Add</button>
+            <button onclick="dismissDetected(${i})" style="padding:3px 10px;background:#21262d;border:1px solid #30363d;border-radius:4px;color:#8b949e;cursor:pointer;font-size:12px;margin-left:4px;">Skip</button>
+          </div>
+        </div>
+      `).join('')}
+      <div style="margin-top:8px;">
+        <button onclick="acceptAllDetected()" style="padding:5px 14px;background:#238636;border:none;border-radius:5px;color:#fff;cursor:pointer;font-size:12px;">Add all</button>
+        <button onclick="document.getElementById('subDetected').style.display='none'" style="padding:5px 14px;background:#21262d;border:1px solid #30363d;border-radius:5px;color:#8b949e;cursor:pointer;font-size:12px;margin-left:6px;">Dismiss</button>
+      </div>
+    </div>`;
+  el._candidates = candidates;
+}
+
+function guessSubCategory(desc, txCategory) {
+  const d = desc.toLowerCase();
+  if (/spotify|apple music|youtube.*music|amazon music/i.test(d)) return 'Music';
+  if (/netflix|disney|hulu|amazon prime|apple tv/i.test(d)) return 'Streaming';
+  if (/icloud|google one|dropbox/i.test(d)) return 'Cloud Storage';
+  if (/figma|github|claude|anthropic|openai|aws|google.*workspace|chatwork|rize/i.test(d)) return 'Software';
+  if (/newspicks|nikkei|wsj|medium|substack/i.test(d)) return 'News/Media';
+  if (/gym|fitness|eatune/i.test(d)) return 'Fitness';
+  if (/insurance|保険/i.test(d)) return 'Insurance';
+  if (/phone|mobile|docomo|au |softbank|internet|wifi/i.test(d)) return 'Phone/Internet';
+  if (txCategory === 'Subscriptions') return 'Software';
+  return 'Other';
+}
+
+function acceptDetected(idx) {
+  const el = document.getElementById('subDetected');
+  const c = el._candidates[idx];
+  if (!c) return;
+  // Estimate next date: last seen date + ~1 month
+  const last = new Date(c.lastDate);
+  last.setMonth(last.getMonth() + 1);
+  const nextDate = last.toISOString().slice(0, 10);
+  subscriptions.push({ id: Date.now() + idx, name: c.desc, amount: c.avg, currency: c.currency, cycle: 'monthly', category: c.subCat, nextDate });
+  saveSubs();
+  const row = document.getElementById('detected_' + idx);
+  if (row) row.innerHTML = '<span style="color:#3fb950;">Added ✓</span>';
+  renderSubs();
+}
+
+function dismissDetected(idx) {
+  const row = document.getElementById('detected_' + idx);
+  if (row) row.style.display = 'none';
+}
+
+function acceptAllDetected() {
+  const el = document.getElementById('subDetected');
+  const candidates = el._candidates;
+  if (!candidates) return;
+  const existingNames = new Set(subscriptions.map(s => s.name.toLowerCase().trim()));
+  candidates.forEach((c, i) => {
+    if (existingNames.has(c.desc.toLowerCase().trim())) return;
+    const last = new Date(c.lastDate);
+    last.setMonth(last.getMonth() + 1);
+    const nextDate = last.toISOString().slice(0, 10);
+    subscriptions.push({ id: Date.now() + i, name: c.desc, amount: c.avg, currency: c.currency, cycle: 'monthly', category: guessSubCategory(c.desc, c.category), nextDate });
+  });
+  saveSubs();
+  el.style.display = 'none';
+  renderSubs();
 }
 
 // --- Budgets ---
