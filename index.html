@@ -38,7 +38,7 @@
 
   /* Region Summary */
   .region-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
-  @media (max-width: 800px) { .region-summary { grid-template-columns: 1fr; } }
+  @media (max-width: 800px) { .region-summary { grid-template-columns: 1fr; } #insights > div:first-child { grid-template-columns: 1fr !important; } }
   .region-card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px; }
   .region-card.jp { border-left: 3px solid #f85149; }
   .region-card.us { border-left: 3px solid #58a6ff; }
@@ -874,143 +874,250 @@ function render() {
   renderBudgets();
 }
 
-// --- Cash Flow Insights ---
+// --- Cash Flow Insights (Visual) ---
+let insightChart = null;
 function renderInsights(monthTx, totalIncome, totalExpense) {
   const el = document.getElementById('insights');
   if (!el) return;
   if (transactions.length < 3) { el.innerHTML = ''; return; }
 
-  const now = new Date();
-  const isCurrentMonth = viewDate.getFullYear() === now.getFullYear() && viewDate.getMonth() === now.getMonth();
-
-  // Gather past months data (up to 6 months) — always combined for runway/forecast
+  // Gather past months data (up to 6 months)
   const pastMonths = [];
   for (let i = 1; i <= 6; i++) {
     const d = new Date(viewDate.getFullYear(), viewDate.getMonth() - i, 1);
     const y = d.getFullYear(), m = d.getMonth();
-    const mTx = transactions.filter(t => {
-      const td = new Date(t.date);
-      return td.getFullYear() === y && td.getMonth() === m;
-    });
+    const label = d.toLocaleDateString('en-US', { month: 'short' });
+    const mTx = transactions.filter(t => { const td = new Date(t.date); return td.getFullYear() === y && td.getMonth() === m; });
     if (mTx.length === 0) continue;
     const inc = mTx.filter(t => t.type === 'income').reduce((s, t) => s + toJPY(t.amount, t.currency || 'JPY'), 0);
     const exp = mTx.filter(t => t.type === 'expense' && !isTransfer(t)).reduce((s, t) => s + toJPY(t.amount, t.currency || 'JPY'), 0);
-    // Also compute per-region
     const jpM = mTx.filter(t => getRegion(t) === 'jp');
     const usM = mTx.filter(t => getRegion(t) === 'us');
     pastMonths.push({
-      inc, exp, net: inc - exp,
+      label, inc, exp, net: inc - exp,
       jpInc: jpM.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0),
       jpExp: jpM.filter(t => t.type === 'expense' && !isTransfer(t)).reduce((s, t) => s + t.amount, 0),
       usInc: usM.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0),
       usExp: usM.filter(t => t.type === 'expense' && !isTransfer(t)).reduce((s, t) => s + t.amount, 0),
     });
   }
+  pastMonths.reverse(); // oldest first
 
-  const insights = [];
-
-  // 1. Recurring charges detection
+  // Recurring charges
   const descCounts = {};
   transactions.forEach(t => {
     if (t.type !== 'expense') return;
     const key = t.desc.toLowerCase().trim();
-    if (!descCounts[key]) descCounts[key] = { desc: t.desc, months: new Set(), total: 0, count: 0, category: t.category };
+    if (!descCounts[key]) descCounts[key] = { desc: t.desc, months: new Set(), total: 0, count: 0, category: t.category, currency: t.currency || 'JPY' };
     descCounts[key].months.add(t.date.slice(0, 7));
     descCounts[key].total += toJPY(t.amount, t.currency || 'JPY');
     descCounts[key].count++;
   });
-  const recurring = Object.values(descCounts)
-    .filter(d => d.months.size >= 2)
-    .sort((a, b) => (b.total / b.count) - (a.total / a.count));
+  const recurring = Object.values(descCounts).filter(d => d.months.size >= 2).sort((a, b) => (b.total / b.count) - (a.total / a.count));
+  const recurringTotal = recurring.reduce((s, r) => s + r.total / r.count, 0);
 
-  if (recurring.length > 0) {
-    const recurringTotal = recurring.reduce((s, r) => s + r.total / r.count, 0);
-    const top5 = recurring.slice(0, 5).map(r =>
-      `<span style="color:#c9d1d9;">${r.desc}</span> <span style="color:#8b949e;">${formatJPY(r.total / r.count)}/mo</span>`
-    ).join(' · ');
-    insights.push(`<div style="margin-bottom:8px;">
-      <span style="color:#bc8cff;">Recurring:</span> ${top5}
-      ${recurring.length > 5 ? `<span style="color:#8b949e;">+${recurring.length - 5} more</span>` : ''}
-      <span style="color:#8b949e;"> — Total ~${formatJPY(recurringTotal)}/mo</span>
-    </div>`);
-  }
-
-  // 2. Next month forecast (avg of past months) — combined + per-region
-  if (pastMonths.length >= 1) {
-    const avgInc = pastMonths.reduce((s, m) => s + m.inc, 0) / pastMonths.length;
-    const avgExp = pastMonths.reduce((s, m) => s + m.exp, 0) / pastMonths.length;
-    const avgNet = avgInc - avgExp;
-    const trend = pastMonths.length >= 2 ? (pastMonths[0].exp - pastMonths[pastMonths.length - 1].exp) / pastMonths.length : 0;
-    const trendLabel = Math.abs(trend) < 1000 ? 'stable' : trend > 0 ? 'trending up' : 'trending down';
-
-    const avgJpInc = pastMonths.reduce((s, m) => s + m.jpInc, 0) / pastMonths.length;
-    const avgJpExp = pastMonths.reduce((s, m) => s + m.jpExp, 0) / pastMonths.length;
-    const avgUsInc = pastMonths.reduce((s, m) => s + m.usInc, 0) / pastMonths.length;
-    const avgUsExp = pastMonths.reduce((s, m) => s + m.usExp, 0) / pastMonths.length;
-
-    insights.push(`<div style="margin-bottom:8px;">
-      <span style="color:#58a6ff;">Forecast</span> <span style="color:#8b949e;">(${pastMonths.length}mo avg):</span>
-      <span style="color:#3fb950;">Income ${formatJPY(avgInc)}</span> ·
-      <span style="color:#f85149;">Expenses ${formatJPY(avgExp)}</span> ·
-      <span style="color:${avgNet >= 0 ? '#3fb950' : '#f85149'};">Net ${formatJPY(avgNet)}</span>
-      <span style="color:#8b949e;"> — ${trendLabel}</span>
-    </div>
-    <div style="margin-bottom:8px;padding-left:12px;border-left:2px solid #21262d;">
-      <span style="font-size:12px;">🇯🇵 ${formatJPY(avgJpInc)} in / ${formatJPY(avgJpExp)} out · 🇺🇸 ${formatUSD(avgUsInc)} in / ${formatUSD(avgUsExp)} out</span>
-    </div>`);
-  }
-
-  // 3. Runway calculation (always combined across both regions)
+  // Savings & Runway
   const totalSavings = transactions.reduce((s, t) => {
     const amt = toJPY(t.amount, t.currency || 'JPY');
     if (isTransfer(t)) return s;
     return t.type === 'income' ? s + amt : s - amt;
   }, 0);
-  // Per-region cumulative
   const jpSavings = transactions.filter(t => getRegion(t) === 'jp').reduce((s, t) => {
-    if (isTransfer(t)) return s;
-    return t.type === 'income' ? s + t.amount : s - t.amount;
+    if (isTransfer(t)) return s; return t.type === 'income' ? s + t.amount : s - t.amount;
   }, 0);
   const usSavings = transactions.filter(t => getRegion(t) === 'us').reduce((s, t) => {
-    if (isTransfer(t)) return s;
-    return t.type === 'income' ? s + t.amount : s - t.amount;
+    if (isTransfer(t)) return s; return t.type === 'income' ? s + t.amount : s - t.amount;
   }, 0);
 
-  if (pastMonths.length >= 1) {
-    const avgExp = pastMonths.reduce((s, m) => s + m.exp, 0) / pastMonths.length;
-    const avgInc = pastMonths.reduce((s, m) => s + m.inc, 0) / pastMonths.length;
-    const monthlyBurn = avgExp - avgInc;
+  const avgExp = pastMonths.length > 0 ? pastMonths.reduce((s, m) => s + m.exp, 0) / pastMonths.length : 0;
+  const avgInc = pastMonths.length > 0 ? pastMonths.reduce((s, m) => s + m.inc, 0) / pastMonths.length : 0;
+  const monthlyBurn = avgExp - avgInc;
+  const runwayMonths = monthlyBurn > 0 && totalSavings > 0 ? Math.floor(totalSavings / monthlyBurn) : null;
+  const isSaving = monthlyBurn <= 0;
 
-    if (monthlyBurn > 0 && totalSavings > 0) {
-      const runwayMonths = Math.floor(totalSavings / monthlyBurn);
-      insights.push(`<div style="margin-bottom:8px;">
-        <span style="color:#f0883e;">Runway:</span>
-        <span style="color:#c9d1d9;">~${runwayMonths} months</span>
-        <span style="color:#8b949e;">at current burn rate (${formatJPY(monthlyBurn)}/mo deficit)</span>
-      </div>
-      <div style="padding-left:12px;border-left:2px solid #21262d;">
-        <span style="font-size:12px;">🇯🇵 Net: ${formatJPY(jpSavings)} · 🇺🇸 Net: ${formatUSD(usSavings)}</span>
-      </div>`);
-    } else {
-      insights.push(`<div style="margin-bottom:8px;">
-        <span style="color:#3fb950;">Net positive:</span>
-        <span style="color:#c9d1d9;">Saving ~${formatJPY(Math.abs(monthlyBurn))}/mo</span>
-        <span style="color:#8b949e;">· Combined net: ${formatJPY(totalSavings)}</span>
-      </div>
-      <div style="padding-left:12px;border-left:2px solid #21262d;">
-        <span style="font-size:12px;">🇯🇵 Net: ${formatJPY(jpSavings)} · 🇺🇸 Net: ${formatUSD(usSavings)}</span>
-      </div>`);
-    }
-  }
+  // Forecast per-region
+  const avgJpInc = pastMonths.length > 0 ? pastMonths.reduce((s, m) => s + m.jpInc, 0) / pastMonths.length : 0;
+  const avgJpExp = pastMonths.length > 0 ? pastMonths.reduce((s, m) => s + m.jpExp, 0) / pastMonths.length : 0;
+  const avgUsInc = pastMonths.length > 0 ? pastMonths.reduce((s, m) => s + m.usInc, 0) / pastMonths.length : 0;
+  const avgUsExp = pastMonths.length > 0 ? pastMonths.reduce((s, m) => s + m.usExp, 0) / pastMonths.length : 0;
 
-  if (insights.length > 0) {
-    el.innerHTML = `<div style="background:#161b22; border:1px solid #30363d; border-radius:10px; padding:16px; font-size:13px; line-height:1.8;">
-      <div style="font-size:14px; font-weight:600; color:#fff; margin-bottom:8px;">Cash Flow Insights</div>
-      ${insights.join('')}
+  // Build visual HTML
+  const runwayPct = runwayMonths !== null ? Math.min(runwayMonths / 24 * 100, 100) : 100;
+  const runwayColor = runwayMonths !== null ? (runwayMonths > 12 ? '#3fb950' : runwayMonths > 6 ? '#e3b341' : '#f85149') : '#3fb950';
+
+  // Recurring bars
+  const topRecurring = recurring.slice(0, 8);
+  const maxRecurring = topRecurring.length > 0 ? topRecurring[0].total / topRecurring[0].count : 1;
+  const recurringBars = topRecurring.map(r => {
+    const avg = r.total / r.count;
+    const pct = (avg / maxRecurring) * 100;
+    const name = r.desc.length > 28 ? r.desc.slice(0, 26) + '...' : r.desc;
+    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+      <div style="width:140px;font-size:12px;color:#c9d1d9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${r.desc}">${name}</div>
+      <div style="flex:1;height:16px;background:#21262d;border-radius:4px;overflow:hidden;position:relative;">
+        <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#7c3aed,#bc8cff);border-radius:4px;transition:width 0.5s;"></div>
+      </div>
+      <div style="width:80px;font-size:12px;color:#bc8cff;text-align:right;white-space:nowrap;">${formatJPY(avg)}</div>
     </div>`;
-  } else {
-    el.innerHTML = '';
+  }).join('');
+
+  // Net flow sparkline data (past months + current + forecast)
+  const sparkLabels = pastMonths.map(m => m.label);
+  const sparkNet = pastMonths.map(m => m.net);
+  const curLabel = viewDate.toLocaleDateString('en-US', { month: 'short' });
+  sparkLabels.push(curLabel);
+  sparkNet.push(totalIncome - totalExpense);
+  // Add forecast month
+  if (pastMonths.length >= 1) {
+    const nextD = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1);
+    sparkLabels.push(nextD.toLocaleDateString('en-US', { month: 'short' }) + '*');
+    sparkNet.push(avgInc - avgExp);
   }
+
+  el.innerHTML = `
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:0;">
+    <!-- Left: Net Flow Trend + Forecast -->
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;padding:20px;">
+      <div style="font-size:14px;font-weight:600;color:#fff;margin-bottom:12px;">Net Cash Flow Trend</div>
+      <canvas id="insightNetChart" height="140"></canvas>
+      ${pastMonths.length >= 1 ? `
+      <div style="margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div style="background:#0d1117;border-radius:8px;padding:12px;">
+          <div style="font-size:11px;color:#8b949e;text-transform:uppercase;margin-bottom:4px;">Forecast Next Month</div>
+          <div style="font-size:20px;font-weight:700;color:${avgInc - avgExp >= 0 ? '#3fb950' : '#f85149'}">${formatJPY(avgInc - avgExp)}</div>
+          <div style="font-size:11px;color:#8b949e;margin-top:4px;">${pastMonths.length}mo average</div>
+        </div>
+        <div style="background:#0d1117;border-radius:8px;padding:12px;">
+          <div style="font-size:11px;color:#8b949e;text-transform:uppercase;margin-bottom:4px;">Per Region</div>
+          <div style="font-size:13px;color:#c9d1d9;">🇯🇵 ${formatJPY(avgJpInc - avgJpExp)}/mo</div>
+          <div style="font-size:13px;color:#c9d1d9;">🇺🇸 ${formatUSD(avgUsInc - avgUsExp)}/mo</div>
+        </div>
+      </div>` : ''}
+    </div>
+
+    <!-- Right: Runway + Savings -->
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;padding:20px;">
+      <div style="font-size:14px;font-weight:600;color:#fff;margin-bottom:16px;">${isSaving ? 'Savings Health' : 'Runway'}</div>
+
+      ${isSaving ? `
+        <div style="text-align:center;margin-bottom:16px;">
+          <div style="font-size:42px;font-weight:800;color:#3fb950;">${formatJPY(Math.abs(monthlyBurn))}</div>
+          <div style="font-size:13px;color:#8b949e;">saving per month</div>
+        </div>
+      ` : runwayMonths !== null ? `
+        <div style="text-align:center;margin-bottom:16px;">
+          <div style="font-size:42px;font-weight:800;color:${runwayColor};">${runwayMonths}<span style="font-size:18px;color:#8b949e;"> mo</span></div>
+          <div style="font-size:13px;color:#8b949e;">at ${formatJPY(monthlyBurn)}/mo burn</div>
+        </div>
+        <div style="height:10px;background:#21262d;border-radius:5px;overflow:hidden;margin-bottom:12px;">
+          <div style="height:100%;width:${runwayPct}%;background:linear-gradient(90deg,${runwayColor},${runwayColor}88);border-radius:5px;transition:width 0.5s;"></div>
+        </div>
+      ` : ''}
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px;">
+        <div style="background:#0d1117;border-radius:8px;padding:12px;text-align:center;">
+          <div style="font-size:11px;color:#8b949e;">🇯🇵 Net</div>
+          <div style="font-size:16px;font-weight:700;color:${jpSavings >= 0 ? '#3fb950' : '#f85149'}">${formatJPY(jpSavings)}</div>
+        </div>
+        <div style="background:#0d1117;border-radius:8px;padding:12px;text-align:center;">
+          <div style="font-size:11px;color:#8b949e;">🇺🇸 Net</div>
+          <div style="font-size:16px;font-weight:700;color:${usSavings >= 0 ? '#3fb950' : '#f85149'}">${formatUSD(usSavings)}</div>
+        </div>
+      </div>
+      <div style="background:#0d1117;border-radius:8px;padding:12px;text-align:center;margin-top:10px;">
+        <div style="font-size:11px;color:#8b949e;">Combined Net (JPY)</div>
+        <div style="font-size:20px;font-weight:700;color:${totalSavings >= 0 ? '#3fb950' : '#f85149'}">${formatJPY(totalSavings)}</div>
+      </div>
+    </div>
+  </div>
+
+  ${recurring.length > 0 ? `
+  <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;padding:20px;margin-top:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <div style="font-size:14px;font-weight:600;color:#fff;">Recurring Charges</div>
+      <div style="font-size:13px;color:#bc8cff;font-weight:600;">${formatJPY(recurringTotal)}<span style="color:#8b949e;font-weight:400;">/mo total</span></div>
+    </div>
+    ${recurringBars}
+    ${recurring.length > 8 ? `<div style="font-size:12px;color:#8b949e;margin-top:4px;">+${recurring.length - 8} more</div>` : ''}
+  </div>` : ''}
+  `;
+
+  // Render net flow chart
+  setTimeout(() => {
+    const ctx = document.getElementById('insightNetChart');
+    if (!ctx) return;
+    if (insightChart) insightChart.destroy();
+    insightChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: sparkLabels,
+        datasets: [{
+          data: sparkNet,
+          borderColor: sparkNet.map(v => v >= 0 ? '#3fb950' : '#f85149'),
+          backgroundColor: (context) => {
+            const chart = context.chart;
+            const { ctx: c, chartArea } = chart;
+            if (!chartArea) return 'transparent';
+            const g = c.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+            g.addColorStop(0, 'rgba(63,185,80,0.15)');
+            g.addColorStop(0.5, 'transparent');
+            g.addColorStop(1, 'rgba(248,81,73,0.15)');
+            return g;
+          },
+          fill: true,
+          tension: 0.35,
+          borderWidth: 2.5,
+          pointRadius: sparkLabels.map((l, i) => i === sparkLabels.length - 2 ? 6 : l.includes('*') ? 5 : 4),
+          pointBackgroundColor: sparkNet.map(v => v >= 0 ? '#3fb950' : '#f85149'),
+          pointBorderColor: sparkLabels.map((l, i) => i === sparkLabels.length - 2 ? '#fff' : 'transparent'),
+          pointBorderWidth: sparkLabels.map((l, i) => i === sparkLabels.length - 2 ? 2 : 0),
+          pointStyle: sparkLabels.map(l => l.includes('*') ? 'rectRot' : 'circle'),
+          segment: {
+            borderColor: ctx2 => {
+              const idx = ctx2.p0DataIndex;
+              return sparkNet[idx] >= 0 ? '#3fb950' : '#f85149';
+            },
+            borderDash: ctx2 => ctx2.p1DataIndex === sparkLabels.length - 1 ? [5, 3] : []
+          }
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx2) => formatJPY(ctx2.parsed.y),
+              title: (items) => {
+                const l = items[0].label;
+                return l.includes('*') ? l.replace('*', '') + ' (forecast)' : l;
+              }
+            },
+            backgroundColor: '#21262d',
+            borderColor: '#30363d',
+            borderWidth: 1,
+            titleColor: '#c9d1d9',
+            bodyColor: '#e1e4e8',
+          }
+        },
+        scales: {
+          x: {
+            ticks: { color: '#8b949e', font: { size: 11 } },
+            grid: { display: false }
+          },
+          y: {
+            ticks: {
+              color: '#8b949e',
+              font: { size: 11 },
+              callback: v => v >= 1000000 || v <= -1000000 ? (v / 1000000).toFixed(1) + 'M' : v >= 1000 || v <= -1000 ? (v / 1000).toFixed(0) + 'K' : v
+            },
+            grid: { color: '#21262d', drawBorder: false }
+          }
+        }
+      }
+    });
+  }, 50);
 }
 
 // --- CSV Import ---
