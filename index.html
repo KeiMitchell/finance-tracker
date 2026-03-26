@@ -903,19 +903,6 @@ function renderInsights(monthTx, totalIncome, totalExpense) {
   }
   pastMonths.reverse(); // oldest first
 
-  // Recurring charges
-  const descCounts = {};
-  transactions.forEach(t => {
-    if (t.type !== 'expense') return;
-    const key = t.desc.toLowerCase().trim();
-    if (!descCounts[key]) descCounts[key] = { desc: t.desc, months: new Set(), total: 0, count: 0, category: t.category, currency: t.currency || 'JPY' };
-    descCounts[key].months.add(t.date.slice(0, 7));
-    descCounts[key].total += toJPY(t.amount, t.currency || 'JPY');
-    descCounts[key].count++;
-  });
-  const recurring = Object.values(descCounts).filter(d => d.months.size >= 2).sort((a, b) => (b.total / b.count) - (a.total / a.count));
-  const recurringTotal = recurring.reduce((s, r) => s + r.total / r.count, 0);
-
   // Savings & Runway
   const totalSavings = transactions.reduce((s, t) => {
     const amt = toJPY(t.amount, t.currency || 'JPY');
@@ -945,21 +932,24 @@ function renderInsights(monthTx, totalIncome, totalExpense) {
   const runwayPct = runwayMonths !== null ? Math.min(runwayMonths / 24 * 100, 100) : 100;
   const runwayColor = runwayMonths !== null ? (runwayMonths > 12 ? '#3fb950' : runwayMonths > 6 ? '#e3b341' : '#f85149') : '#3fb950';
 
-  // Recurring bars
-  const topRecurring = recurring.slice(0, 8);
-  const maxRecurring = topRecurring.length > 0 ? topRecurring[0].total / topRecurring[0].count : 1;
-  const recurringBars = topRecurring.map(r => {
-    const avg = r.total / r.count;
-    const pct = (avg / maxRecurring) * 100;
-    const name = r.desc.length > 28 ? r.desc.slice(0, 26) + '...' : r.desc;
+  // Recurring bars — from registered subscriptions only
+  const subsSorted = [...subscriptions].sort((a, b) => getMonthlyAmount(b) - getMonthlyAmount(a));
+  const maxSub = subsSorted.length > 0 ? getMonthlyAmount(subsSorted[0]) : 1;
+  const recurringBars = subsSorted.map(s => {
+    const monthly = getMonthlyAmount(s);
+    const pct = (monthly / maxSub) * 100;
+    const name = s.name.length > 28 ? s.name.slice(0, 26) + '...' : s.name;
+    const cur = s.currency || 'JPY';
+    const cycleLabel = { monthly: '/mo', yearly: '/yr', weekly: '/wk' }[s.cycle] || '';
     return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-      <div style="width:140px;font-size:12px;color:#c9d1d9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${r.desc}">${name}</div>
+      <div style="width:140px;font-size:12px;color:#c9d1d9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${s.name}">${name}</div>
       <div style="flex:1;height:16px;background:#21262d;border-radius:4px;overflow:hidden;position:relative;">
         <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#7c3aed,#bc8cff);border-radius:4px;transition:width 0.5s;"></div>
       </div>
-      <div style="width:80px;font-size:12px;color:#bc8cff;text-align:right;white-space:nowrap;">${formatJPY(avg)}</div>
+      <div style="width:90px;font-size:12px;color:#bc8cff;text-align:right;white-space:nowrap;">${formatJPY(monthly)}</div>
     </div>`;
   }).join('');
+  const subsTotal = subsSorted.reduce((s, sub) => s + getMonthlyAmount(sub), 0);
 
   // Net flow sparkline data (past months + current + forecast)
   const sparkLabels = pastMonths.map(m => m.label);
@@ -1031,14 +1021,13 @@ function renderInsights(monthTx, totalIncome, totalExpense) {
     </div>
   </div>
 
-  ${recurring.length > 0 ? `
+  ${subscriptions.length > 0 ? `
   <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;padding:20px;margin-top:16px;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-      <div style="font-size:14px;font-weight:600;color:#fff;">Recurring Charges</div>
-      <div style="font-size:13px;color:#bc8cff;font-weight:600;">${formatJPY(recurringTotal)}<span style="color:#8b949e;font-weight:400;">/mo total</span></div>
+      <div style="font-size:14px;font-weight:600;color:#fff;">Subscriptions</div>
+      <div style="font-size:13px;color:#bc8cff;font-weight:600;">${formatJPY(subsTotal)}<span style="color:#8b949e;font-weight:400;">/mo total</span></div>
     </div>
     ${recurringBars}
-    ${recurring.length > 8 ? `<div style="font-size:12px;color:#8b949e;margin-top:4px;">+${recurring.length - 8} more</div>` : ''}
   </div>` : ''}
   `;
 
