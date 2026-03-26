@@ -515,6 +515,17 @@ let currentType = 'income';
 let viewDate = new Date();
 let currentRegion = 'all'; // 'all', 'jp', 'us'
 let currentPage = 'dashboard';
+let displayCurrency = 'JPY'; // 'JPY' or 'USD' for combined bar
+
+function toggleDisplayCurrency() {
+  displayCurrency = displayCurrency === 'JPY' ? 'USD' : 'JPY';
+  render();
+}
+
+function toUSD(jpyAmount) { return jpyAmount / getRate(); }
+function formatCombined(jpyAmount) {
+  return displayCurrency === 'USD' ? formatUSD(toUSD(jpyAmount)) : formatJPY(jpyAmount);
+}
 
 function showPage(page) {
   currentPage = page;
@@ -803,16 +814,22 @@ function render() {
       </div>
     </div>
     <div class="combined-bar">
-      <div class="combined-title">Combined (JPY)</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <div class="combined-title" style="margin:0;">Combined</div>
+        <button onclick="toggleDisplayCurrency()" style="padding:4px 12px;background:${displayCurrency === 'JPY' ? '#1a1a2e' : '#1a2e1a'};border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;">
+          ${displayCurrency === 'JPY' ? '¥ JPY' : '$ USD'}
+          <span style="font-size:10px;color:#8b949e;">tap to switch</span>
+        </button>
+      </div>
       <div class="combined-row">
-        <div class="combined-item"><div class="label">Total Income</div><div class="value" style="color:#3fb950">${formatJPY(combinedIncJPY)}</div></div>
+        <div class="combined-item"><div class="label">Total Income</div><div class="value" style="color:#3fb950">${formatCombined(combinedIncJPY)}</div></div>
         <div class="combined-divider"></div>
-        <div class="combined-item"><div class="label">Total Expenses</div><div class="value" style="color:#f85149">${formatJPY(combinedExpJPY)}</div></div>
+        <div class="combined-item"><div class="label">Total Expenses</div><div class="value" style="color:#f85149">${formatCombined(combinedExpJPY)}</div></div>
         <div class="combined-divider"></div>
-        <div class="combined-item"><div class="label">Net Cash Flow</div><div class="value" style="color:${combinedNetJPY >= 0 ? '#3fb950' : '#f0883e'}">${formatJPY(combinedNetJPY)}</div></div>
+        <div class="combined-item"><div class="label">Net Cash Flow</div><div class="value" style="color:${combinedNetJPY >= 0 ? '#3fb950' : '#f0883e'}">${formatCombined(combinedNetJPY)}</div></div>
         <div class="combined-divider"></div>
         <div class="combined-item"><div class="label">Savings Rate</div><div class="value" style="color:#58a6ff">${combinedIncJPY > 0 ? ((combinedNetJPY / combinedIncJPY) * 100).toFixed(1) : '0.0'}%</div></div>
-        ${totalTransfers > 0 ? `<div class="combined-divider"></div><div class="combined-item"><div class="label">CC Payments</div><div class="value" style="color:#8b949e">${formatJPY(totalTransfers)}</div></div>` : ''}
+        ${totalTransfers > 0 ? `<div class="combined-divider"></div><div class="combined-item"><div class="label">CC Payments</div><div class="value" style="color:#8b949e">${formatCombined(totalTransfers)}</div></div>` : ''}
       </div>
     </div>
   `;
