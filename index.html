@@ -219,6 +219,7 @@
   </div>
 
   <div class="summary" id="summary"></div>
+  <div id="insights" style="margin-bottom:24px;"></div>
 
   <div class="main-grid">
     <div class="form-section">
@@ -631,6 +632,9 @@ function render() {
     ${Object.keys(budgets).length > 0 ? `<div class="card"><div class="card-label">Budget</div><div class="card-value budget">${formatJPY(Object.values(budgets).reduce((a,b) => a+b, 0) - totalExpense)}</div><div class="card-sub">${Object.values(budgets).reduce((a,b) => a+b, 0) - totalExpense >= 0 ? 'remaining' : 'over budget'}</div></div>` : ''}
   `;
 
+  // --- Cash Flow Insights ---
+  renderInsights(monthTx, totalIncome, totalExpense);
+
   // Transactions list
   const filterType = document.getElementById('filterType').value;
   const filtered = monthTx.filter(t => filterType === 'all' || t.type === filterType).sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -716,6 +720,113 @@ function render() {
   });
 
   renderBudgets();
+}
+
+// --- Cash Flow Insights ---
+function renderInsights(monthTx, totalIncome, totalExpense) {
+  const el = document.getElementById('insights');
+  if (!el) return;
+  if (transactions.length < 3) { el.innerHTML = ''; return; }
+
+  const now = new Date();
+  const isCurrentMonth = viewDate.getFullYear() === now.getFullYear() && viewDate.getMonth() === now.getMonth();
+
+  // Gather past months data (up to 6 months)
+  const pastMonths = [];
+  for (let i = 1; i <= 6; i++) {
+    const d = new Date(viewDate.getFullYear(), viewDate.getMonth() - i, 1);
+    const y = d.getFullYear(), m = d.getMonth();
+    const mTx = transactions.filter(t => {
+      const td = new Date(t.date);
+      return td.getFullYear() === y && td.getMonth() === m;
+    });
+    if (mTx.length === 0) continue;
+    const inc = mTx.filter(t => t.type === 'income').reduce((s, t) => s + toJPY(t.amount, t.currency || 'JPY'), 0);
+    const exp = mTx.filter(t => t.type === 'expense' && !isTransfer(t)).reduce((s, t) => s + toJPY(t.amount, t.currency || 'JPY'), 0);
+    pastMonths.push({ inc, exp, net: inc - exp });
+  }
+
+  const insights = [];
+
+  // 1. Recurring charges detection
+  const descCounts = {};
+  transactions.forEach(t => {
+    if (t.type !== 'expense') return;
+    const key = t.desc.toLowerCase().trim();
+    if (!descCounts[key]) descCounts[key] = { desc: t.desc, months: new Set(), total: 0, count: 0, category: t.category };
+    descCounts[key].months.add(t.date.slice(0, 7));
+    descCounts[key].total += toJPY(t.amount, t.currency || 'JPY');
+    descCounts[key].count++;
+  });
+  const recurring = Object.values(descCounts)
+    .filter(d => d.months.size >= 2)
+    .sort((a, b) => (b.total / b.count) - (a.total / a.count));
+
+  if (recurring.length > 0) {
+    const recurringTotal = recurring.reduce((s, r) => s + r.total / r.count, 0);
+    const top5 = recurring.slice(0, 5).map(r =>
+      `<span style="color:#c9d1d9;">${r.desc}</span> <span style="color:#8b949e;">${formatJPY(r.total / r.count)}/mo</span>`
+    ).join(' · ');
+    insights.push(`<div style="margin-bottom:8px;">
+      <span style="color:#bc8cff;">Recurring:</span> ${top5}
+      ${recurring.length > 5 ? `<span style="color:#8b949e;">+${recurring.length - 5} more</span>` : ''}
+      <span style="color:#8b949e;"> — Total ~${formatJPY(recurringTotal)}/mo</span>
+    </div>`);
+  }
+
+  // 2. Next month forecast (avg of past months)
+  if (pastMonths.length >= 1) {
+    const avgInc = pastMonths.reduce((s, m) => s + m.inc, 0) / pastMonths.length;
+    const avgExp = pastMonths.reduce((s, m) => s + m.exp, 0) / pastMonths.length;
+    const avgNet = avgInc - avgExp;
+    const trend = pastMonths.length >= 2 ? (pastMonths[0].exp - pastMonths[pastMonths.length - 1].exp) / pastMonths.length : 0;
+    const trendLabel = Math.abs(trend) < 1000 ? 'stable' : trend > 0 ? 'trending up' : 'trending down';
+
+    insights.push(`<div style="margin-bottom:8px;">
+      <span style="color:#58a6ff;">Next month forecast</span> <span style="color:#8b949e;">(${pastMonths.length}mo avg):</span>
+      <span style="color:#3fb950;">Income ${formatJPY(avgInc)}</span> ·
+      <span style="color:#f85149;">Expenses ${formatJPY(avgExp)}</span> ·
+      <span style="color:${avgNet >= 0 ? '#3fb950' : '#f85149'};">Net ${formatJPY(avgNet)}</span>
+      <span style="color:#8b949e;"> — spending ${trendLabel}</span>
+    </div>`);
+  }
+
+  // 3. Runway calculation
+  const totalSavings = transactions.reduce((s, t) => {
+    const amt = toJPY(t.amount, t.currency || 'JPY');
+    if (isTransfer(t)) return s;
+    return t.type === 'income' ? s + amt : s - amt;
+  }, 0);
+
+  if (pastMonths.length >= 1 && totalSavings > 0) {
+    const avgExp = pastMonths.reduce((s, m) => s + m.exp, 0) / pastMonths.length;
+    const avgInc = pastMonths.reduce((s, m) => s + m.inc, 0) / pastMonths.length;
+    const monthlyBurn = avgExp - avgInc;
+
+    if (monthlyBurn > 0) {
+      const runwayMonths = Math.floor(totalSavings / monthlyBurn);
+      insights.push(`<div>
+        <span style="color:#f0883e;">Runway:</span>
+        <span style="color:#c9d1d9;">~${runwayMonths} months</span>
+        <span style="color:#8b949e;">at current burn rate (${formatJPY(monthlyBurn)}/mo deficit)</span>
+      </div>`);
+    } else {
+      insights.push(`<div>
+        <span style="color:#3fb950;">Net positive:</span>
+        <span style="color:#c9d1d9;">Saving ~${formatJPY(Math.abs(monthlyBurn))}/mo</span>
+        <span style="color:#8b949e;">· Cumulative net: ${formatJPY(totalSavings)}</span>
+      </div>`);
+    }
+  }
+
+  if (insights.length > 0) {
+    el.innerHTML = `<div style="background:#161b22; border:1px solid #30363d; border-radius:10px; padding:16px; font-size:13px; line-height:1.8;">
+      <div style="font-size:14px; font-weight:600; color:#fff; margin-bottom:8px;">Cash Flow Insights</div>
+      ${insights.join('')}
+    </div>`;
+  } else {
+    el.innerHTML = '';
+  }
 }
 
 // --- CSV Import ---
