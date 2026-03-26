@@ -29,6 +29,38 @@
   .auth-status.offline { color: #e3b341; background: #2d2a11; }
   .auth-error { font-size: 12px; color: #f85149; }
 
+  /* Region Toggle */
+  .region-toggle { display: flex; gap: 4px; background: #0d1117; border-radius: 10px; padding: 4px; margin-bottom: 20px; width: fit-content; }
+  .region-btn { padding: 8px 20px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; color: #8b949e; background: transparent; transition: all 0.25s; display: flex; align-items: center; gap: 6px; }
+  .region-btn:hover { color: #c9d1d9; background: #161b22; }
+  .region-btn.active { color: #fff; background: #21262d; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+  .region-btn .flag { font-size: 16px; }
+
+  /* Region Summary */
+  .region-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+  @media (max-width: 800px) { .region-summary { grid-template-columns: 1fr; } }
+  .region-card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px; }
+  .region-card.jp { border-left: 3px solid #f85149; }
+  .region-card.us { border-left: 3px solid #58a6ff; }
+  .region-header { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; font-size: 15px; font-weight: 600; color: #c9d1d9; }
+  .region-header .flag { font-size: 20px; }
+  .region-stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .region-stat-label { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
+  .region-stat-value { font-size: 20px; font-weight: 700; }
+  .region-stat-value.income { color: #3fb950; }
+  .region-stat-value.expense { color: #f85149; }
+  .region-stat-value.net { color: #58a6ff; }
+  .region-stat-value.net.negative { color: #f0883e; }
+
+  /* Combined Total Bar */
+  .combined-bar { background: linear-gradient(135deg, #161b22, #1c2333); border: 1px solid #30363d; border-radius: 12px; padding: 20px; margin-bottom: 24px; }
+  .combined-title { font-size: 13px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
+  .combined-row { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+  .combined-item { text-align: center; }
+  .combined-item .label { font-size: 11px; color: #8b949e; }
+  .combined-item .value { font-size: 24px; font-weight: 700; }
+  .combined-divider { width: 1px; height: 40px; background: #30363d; }
+
   /* Summary Cards */
   .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px; }
   .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px; }
@@ -218,6 +250,13 @@
     <span class="rate-hint">All summaries & charts shown in JPY</span>
   </div>
 
+  <div class="region-toggle" id="regionToggle">
+    <button class="region-btn active" onclick="setRegion('all')"><span class="flag">All</span></button>
+    <button class="region-btn" onclick="setRegion('jp')"><span class="flag">JP</span></button>
+    <button class="region-btn" onclick="setRegion('us')"><span class="flag">US</span></button>
+  </div>
+
+  <div id="regionSummary"></div>
   <div class="summary" id="summary"></div>
   <div id="insights" style="margin-bottom:24px;"></div>
 
@@ -449,6 +488,27 @@ const CATEGORY_COLORS = ['#58a6ff','#3fb950','#f0883e','#bc8cff','#f85149','#39d
 let transactions = JSON.parse(localStorage.getItem('finance_tx') || '[]');
 let currentType = 'income';
 let viewDate = new Date();
+let currentRegion = 'all'; // 'all', 'jp', 'us'
+
+function setRegion(region) {
+  currentRegion = region;
+  document.querySelectorAll('.region-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector(`.region-btn[onclick="setRegion('${region}')"]`).classList.add('active');
+  render();
+}
+
+function getRegion(t) {
+  return (t.currency || 'JPY') === 'USD' ? 'us' : 'jp';
+}
+
+function filterByRegion(txList) {
+  if (currentRegion === 'all') return txList;
+  return txList.filter(t => getRegion(t) === currentRegion);
+}
+
+function formatUSD(n) {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(Math.round(n));
+}
 
 // Set default date to today
 document.getElementById('date').value = new Date().toISOString().slice(0, 10);
@@ -656,27 +716,78 @@ function render() {
   monthPicker.value = viewDate.getFullYear() + '-' + String(viewDate.getMonth() + 1).padStart(2, '0');
   document.getElementById('exchangeRate').value = getRate();
 
-  const monthTx = getMonthTx();
+  const allMonthTx = getMonthTx();
+  const monthTx = filterByRegion(allMonthTx);
+
+  // Per-region calculations (always compute both for the split view)
+  const jpTx = allMonthTx.filter(t => getRegion(t) === 'jp');
+  const usTx = allMonthTx.filter(t => getRegion(t) === 'us');
+
+  const jpIncome = jpTx.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+  const jpExpense = jpTx.filter(t => t.type === 'expense' && !isTransfer(t)).reduce((s, t) => s + t.amount, 0);
+  const jpNet = jpIncome - jpExpense;
+
+  const usIncome = usTx.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+  const usExpense = usTx.filter(t => t.type === 'expense' && !isTransfer(t)).reduce((s, t) => s + t.amount, 0);
+  const usNet = usIncome - usExpense;
+
+  // Combined in JPY
   const totalIncome = monthTx.filter(t => t.type === 'income').reduce((s, t) => s + toJPY(t.amount, t.currency || 'JPY'), 0);
   const totalExpense = monthTx.filter(t => t.type === 'expense' && !isTransfer(t)).reduce((s, t) => s + toJPY(t.amount, t.currency || 'JPY'), 0);
   const totalTransfers = monthTx.filter(t => t.type === 'expense' && isTransfer(t)).reduce((s, t) => s + toJPY(t.amount, t.currency || 'JPY'), 0);
   const net = totalIncome - totalExpense;
   const savingsRate = totalIncome > 0 ? ((net / totalIncome) * 100).toFixed(1) : '0.0';
 
-  document.getElementById('summary').innerHTML = `
-    <div class="card"><div class="card-label">Income</div><div class="card-value income">${formatJPY(totalIncome)}</div><div class="card-sub">This month (JPY)</div></div>
-    <div class="card"><div class="card-label">Expenses</div><div class="card-value expense">${formatJPY(totalExpense)}</div><div class="card-sub">This month (JPY)</div></div>
-    <div class="card"><div class="card-label">Net Cash Flow</div><div class="card-value net">${formatJPY(net)}</div><div class="card-sub">${net >= 0 ? 'Surplus' : 'Deficit'}</div></div>
-    ${totalTransfers > 0 ? `<div class="card"><div class="card-label">CC Payments</div><div class="card-value" style="color:#8b949e">${formatJPY(totalTransfers)}</div><div class="card-sub">not counted in expenses</div></div>` : ''}
-    <div class="card"><div class="card-label">Savings Rate</div><div class="card-value net">${savingsRate}%</div><div class="card-sub">of income saved</div></div>
-    <div class="card"><div class="card-label">Subscriptions</div><div class="card-value subs">${formatJPY(subscriptions.reduce((s, sub) => s + getMonthlyAmount(sub), 0))}</div><div class="card-sub">per month</div></div>
-    ${Object.keys(budgets).length > 0 ? `<div class="card"><div class="card-label">Budget</div><div class="card-value budget">${formatJPY(Object.values(budgets).reduce((a,b) => a+b, 0) - totalExpense)}</div><div class="card-sub">${Object.values(budgets).reduce((a,b) => a+b, 0) - totalExpense >= 0 ? 'remaining' : 'over budget'}</div></div>` : ''}
+  const combinedIncJPY = jpIncome + toJPY(usIncome, 'USD');
+  const combinedExpJPY = jpExpense + toJPY(usExpense, 'USD');
+  const combinedNetJPY = combinedIncJPY - combinedExpJPY;
+
+  // Region Summary (always show side-by-side JP/US + combined bar)
+  const regionEl = document.getElementById('regionSummary');
+  const hasJP = jpTx.length > 0 || currentRegion === 'jp' || currentRegion === 'all';
+  const hasUS = usTx.length > 0 || currentRegion === 'us' || currentRegion === 'all';
+
+  regionEl.innerHTML = `
+    <div class="region-summary">
+      <div class="region-card jp">
+        <div class="region-header"><span class="flag">🇯🇵</span> Japan</div>
+        <div class="region-stats">
+          <div><div class="region-stat-label">Income</div><div class="region-stat-value income">${formatJPY(jpIncome)}</div></div>
+          <div><div class="region-stat-label">Expenses</div><div class="region-stat-value expense">${formatJPY(jpExpense)}</div></div>
+          <div><div class="region-stat-label">Net</div><div class="region-stat-value net ${jpNet < 0 ? 'negative' : ''}">${formatJPY(jpNet)}</div></div>
+        </div>
+      </div>
+      <div class="region-card us">
+        <div class="region-header"><span class="flag">🇺🇸</span> United States</div>
+        <div class="region-stats">
+          <div><div class="region-stat-label">Income</div><div class="region-stat-value income">${formatUSD(usIncome)}</div></div>
+          <div><div class="region-stat-label">Expenses</div><div class="region-stat-value expense">${formatUSD(usExpense)}</div></div>
+          <div><div class="region-stat-label">Net</div><div class="region-stat-value net ${usNet < 0 ? 'negative' : ''}">${formatUSD(usNet)}</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="combined-bar">
+      <div class="combined-title">Combined (JPY)</div>
+      <div class="combined-row">
+        <div class="combined-item"><div class="label">Total Income</div><div class="value" style="color:#3fb950">${formatJPY(combinedIncJPY)}</div></div>
+        <div class="combined-divider"></div>
+        <div class="combined-item"><div class="label">Total Expenses</div><div class="value" style="color:#f85149">${formatJPY(combinedExpJPY)}</div></div>
+        <div class="combined-divider"></div>
+        <div class="combined-item"><div class="label">Net Cash Flow</div><div class="value" style="color:${combinedNetJPY >= 0 ? '#3fb950' : '#f0883e'}">${formatJPY(combinedNetJPY)}</div></div>
+        <div class="combined-divider"></div>
+        <div class="combined-item"><div class="label">Savings Rate</div><div class="value" style="color:#58a6ff">${combinedIncJPY > 0 ? ((combinedNetJPY / combinedIncJPY) * 100).toFixed(1) : '0.0'}%</div></div>
+        ${totalTransfers > 0 ? `<div class="combined-divider"></div><div class="combined-item"><div class="label">CC Payments</div><div class="value" style="color:#8b949e">${formatJPY(totalTransfers)}</div></div>` : ''}
+      </div>
+    </div>
   `;
+
+  // Hide old summary cards (replaced by region summary)
+  document.getElementById('summary').innerHTML = '';
 
   // --- Cash Flow Insights ---
   renderInsights(monthTx, totalIncome, totalExpense);
 
-  // Transactions list
+  // Transactions list (filtered by region)
   const filterType = document.getElementById('filterType').value;
   const filtered = monthTx.filter(t => filterType === 'all' || t.type === filterType).sort((a, b) => new Date(b.date) - new Date(a.date));
   const txList = document.getElementById('txList');
@@ -694,7 +805,7 @@ function render() {
       <div class="tx-item">
         <div class="tx-left">
           <div class="tx-icon ${iconClass}">${CATEGORY_ICONS[t.category] || '📌'}</div>
-          <div><div class="tx-desc">${t.desc}${transfer ? '<span class="tx-transfer-badge">transfer</span>' : ''}</div><div class="tx-cat"><select onchange="updateCategory(${t.id},this.value)" style="background:transparent;color:#8b949e;border:none;font-size:12px;cursor:pointer;padding:0;margin:-2px 0;">${[...EXPENSE_CATEGORIES,...INCOME_CATEGORIES].map(c=>`<option value="${c}"${c===t.category?' selected':''}>${c}</option>`).join('')}</select></div></div>
+          <div><div class="tx-desc"><span style="font-size:12px;margin-right:4px;">${getRegion(t) === 'us' ? '🇺🇸' : '🇯🇵'}</span>${t.desc}${transfer ? '<span class="tx-transfer-badge">transfer</span>' : ''}</div><div class="tx-cat"><select onchange="updateCategory(${t.id},this.value)" style="background:transparent;color:#8b949e;border:none;font-size:12px;cursor:pointer;padding:0;margin:-2px 0;">${[...EXPENSE_CATEGORIES,...INCOME_CATEGORIES].map(c=>`<option value="${c}"${c===t.category?' selected':''}>${c}</option>`).join('')}</select></div></div>
         </div>
         <div style="display:flex;align-items:center">
           <div class="tx-right">
@@ -708,14 +819,14 @@ function render() {
     }).join('');
   }
 
-  // Cash flow chart (last 6 months)
+  // Cash flow chart (last 6 months, region-filtered)
   const months = [];
   const incomeData = [], expenseData = [], netData = [];
   for (let i = 5; i >= 0; i--) {
     const d = new Date(viewDate.getFullYear(), viewDate.getMonth() - i, 1);
     const label = d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
     months.push(label);
-    const mTx = transactions.filter(t => { const td = new Date(t.date); return td.getFullYear() === d.getFullYear() && td.getMonth() === d.getMonth(); });
+    const mTx = filterByRegion(transactions.filter(t => { const td = new Date(t.date); return td.getFullYear() === d.getFullYear() && td.getMonth() === d.getMonth(); }));
     const inc = mTx.filter(t => t.type === 'income').reduce((s, t) => s + toJPY(t.amount, t.currency || 'JPY'), 0);
     const exp = mTx.filter(t => t.type === 'expense' && !isTransfer(t)).reduce((s, t) => s + toJPY(t.amount, t.currency || 'JPY'), 0);
     incomeData.push(inc);
@@ -772,7 +883,7 @@ function renderInsights(monthTx, totalIncome, totalExpense) {
   const now = new Date();
   const isCurrentMonth = viewDate.getFullYear() === now.getFullYear() && viewDate.getMonth() === now.getMonth();
 
-  // Gather past months data (up to 6 months)
+  // Gather past months data (up to 6 months) — always combined for runway/forecast
   const pastMonths = [];
   for (let i = 1; i <= 6; i++) {
     const d = new Date(viewDate.getFullYear(), viewDate.getMonth() - i, 1);
@@ -784,7 +895,16 @@ function renderInsights(monthTx, totalIncome, totalExpense) {
     if (mTx.length === 0) continue;
     const inc = mTx.filter(t => t.type === 'income').reduce((s, t) => s + toJPY(t.amount, t.currency || 'JPY'), 0);
     const exp = mTx.filter(t => t.type === 'expense' && !isTransfer(t)).reduce((s, t) => s + toJPY(t.amount, t.currency || 'JPY'), 0);
-    pastMonths.push({ inc, exp, net: inc - exp });
+    // Also compute per-region
+    const jpM = mTx.filter(t => getRegion(t) === 'jp');
+    const usM = mTx.filter(t => getRegion(t) === 'us');
+    pastMonths.push({
+      inc, exp, net: inc - exp,
+      jpInc: jpM.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0),
+      jpExp: jpM.filter(t => t.type === 'expense' && !isTransfer(t)).reduce((s, t) => s + t.amount, 0),
+      usInc: usM.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0),
+      usExp: usM.filter(t => t.type === 'expense' && !isTransfer(t)).reduce((s, t) => s + t.amount, 0),
+    });
   }
 
   const insights = [];
@@ -815,7 +935,7 @@ function renderInsights(monthTx, totalIncome, totalExpense) {
     </div>`);
   }
 
-  // 2. Next month forecast (avg of past months)
+  // 2. Next month forecast (avg of past months) — combined + per-region
   if (pastMonths.length >= 1) {
     const avgInc = pastMonths.reduce((s, m) => s + m.inc, 0) / pastMonths.length;
     const avgExp = pastMonths.reduce((s, m) => s + m.exp, 0) / pastMonths.length;
@@ -823,39 +943,62 @@ function renderInsights(monthTx, totalIncome, totalExpense) {
     const trend = pastMonths.length >= 2 ? (pastMonths[0].exp - pastMonths[pastMonths.length - 1].exp) / pastMonths.length : 0;
     const trendLabel = Math.abs(trend) < 1000 ? 'stable' : trend > 0 ? 'trending up' : 'trending down';
 
+    const avgJpInc = pastMonths.reduce((s, m) => s + m.jpInc, 0) / pastMonths.length;
+    const avgJpExp = pastMonths.reduce((s, m) => s + m.jpExp, 0) / pastMonths.length;
+    const avgUsInc = pastMonths.reduce((s, m) => s + m.usInc, 0) / pastMonths.length;
+    const avgUsExp = pastMonths.reduce((s, m) => s + m.usExp, 0) / pastMonths.length;
+
     insights.push(`<div style="margin-bottom:8px;">
-      <span style="color:#58a6ff;">Next month forecast</span> <span style="color:#8b949e;">(${pastMonths.length}mo avg):</span>
+      <span style="color:#58a6ff;">Forecast</span> <span style="color:#8b949e;">(${pastMonths.length}mo avg):</span>
       <span style="color:#3fb950;">Income ${formatJPY(avgInc)}</span> ·
       <span style="color:#f85149;">Expenses ${formatJPY(avgExp)}</span> ·
       <span style="color:${avgNet >= 0 ? '#3fb950' : '#f85149'};">Net ${formatJPY(avgNet)}</span>
-      <span style="color:#8b949e;"> — spending ${trendLabel}</span>
+      <span style="color:#8b949e;"> — ${trendLabel}</span>
+    </div>
+    <div style="margin-bottom:8px;padding-left:12px;border-left:2px solid #21262d;">
+      <span style="font-size:12px;">🇯🇵 ${formatJPY(avgJpInc)} in / ${formatJPY(avgJpExp)} out · 🇺🇸 ${formatUSD(avgUsInc)} in / ${formatUSD(avgUsExp)} out</span>
     </div>`);
   }
 
-  // 3. Runway calculation
+  // 3. Runway calculation (always combined across both regions)
   const totalSavings = transactions.reduce((s, t) => {
     const amt = toJPY(t.amount, t.currency || 'JPY');
     if (isTransfer(t)) return s;
     return t.type === 'income' ? s + amt : s - amt;
   }, 0);
+  // Per-region cumulative
+  const jpSavings = transactions.filter(t => getRegion(t) === 'jp').reduce((s, t) => {
+    if (isTransfer(t)) return s;
+    return t.type === 'income' ? s + t.amount : s - t.amount;
+  }, 0);
+  const usSavings = transactions.filter(t => getRegion(t) === 'us').reduce((s, t) => {
+    if (isTransfer(t)) return s;
+    return t.type === 'income' ? s + t.amount : s - t.amount;
+  }, 0);
 
-  if (pastMonths.length >= 1 && totalSavings > 0) {
+  if (pastMonths.length >= 1) {
     const avgExp = pastMonths.reduce((s, m) => s + m.exp, 0) / pastMonths.length;
     const avgInc = pastMonths.reduce((s, m) => s + m.inc, 0) / pastMonths.length;
     const monthlyBurn = avgExp - avgInc;
 
-    if (monthlyBurn > 0) {
+    if (monthlyBurn > 0 && totalSavings > 0) {
       const runwayMonths = Math.floor(totalSavings / monthlyBurn);
-      insights.push(`<div>
+      insights.push(`<div style="margin-bottom:8px;">
         <span style="color:#f0883e;">Runway:</span>
         <span style="color:#c9d1d9;">~${runwayMonths} months</span>
         <span style="color:#8b949e;">at current burn rate (${formatJPY(monthlyBurn)}/mo deficit)</span>
+      </div>
+      <div style="padding-left:12px;border-left:2px solid #21262d;">
+        <span style="font-size:12px;">🇯🇵 Net: ${formatJPY(jpSavings)} · 🇺🇸 Net: ${formatUSD(usSavings)}</span>
       </div>`);
     } else {
-      insights.push(`<div>
+      insights.push(`<div style="margin-bottom:8px;">
         <span style="color:#3fb950;">Net positive:</span>
         <span style="color:#c9d1d9;">Saving ~${formatJPY(Math.abs(monthlyBurn))}/mo</span>
-        <span style="color:#8b949e;">· Cumulative net: ${formatJPY(totalSavings)}</span>
+        <span style="color:#8b949e;">· Combined net: ${formatJPY(totalSavings)}</span>
+      </div>
+      <div style="padding-left:12px;border-left:2px solid #21262d;">
+        <span style="font-size:12px;">🇯🇵 Net: ${formatJPY(jpSavings)} · 🇺🇸 Net: ${formatUSD(usSavings)}</span>
       </div>`);
     }
   }
