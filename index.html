@@ -466,6 +466,7 @@ function saveLocal() { localStorage.setItem('finance_tx', JSON.stringify(transac
 
 // --- Supabase Data Sync ---
 async function loadFromSupabase() {
+  const local = JSON.parse(localStorage.getItem('finance_tx') || '[]');
   const { data, error } = await sb
     .from('transactions')
     .select('*')
@@ -473,11 +474,11 @@ async function loadFromSupabase() {
     .order('date', { ascending: false });
   if (error) {
     console.error('Load error:', error);
-    transactions = JSON.parse(localStorage.getItem('finance_tx') || '[]');
+    transactions = local;
     return;
   }
   // Map DB rows to local format
-  transactions = data.map(row => ({
+  const remote = data.map(row => ({
     id: row.id,
     type: row.type,
     desc: row.description,
@@ -486,7 +487,28 @@ async function loadFromSupabase() {
     category: row.category,
     date: row.date
   }));
-  saveLocal(); // cache locally
+
+  // Merge: keep whichever has more data, and add any local-only transactions
+  if (remote.length === 0 && local.length > 0) {
+    // Supabase is empty but we have local data — keep local, push to Supabase
+    transactions = local;
+    console.log('Supabase empty, keeping local data. Syncing up...');
+    const rows = local.map(t => ({
+      user_id: currentUser.id, type: t.type, description: t.desc,
+      amount: t.amount, currency: t.currency, category: t.category, date: t.date
+    }));
+    sb.from('transactions').upsert(rows).then(({ error }) => {
+      if (error) console.warn('Sync to Supabase failed:', error);
+    });
+  } else if (remote.length >= local.length) {
+    transactions = remote;
+  } else {
+    // Local has more — merge unique local entries into remote
+    const remoteKeys = new Set(remote.map(t => `${t.date}|${t.desc}|${t.amount}`));
+    const localOnly = local.filter(t => !remoteKeys.has(`${t.date}|${t.desc}|${t.amount}`));
+    transactions = [...remote, ...localOnly];
+  }
+  saveLocal();
 }
 
 async function insertToSupabase(tx) {
