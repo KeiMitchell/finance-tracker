@@ -386,8 +386,13 @@ async function loginWithGoogle() {
 }
 
 async function logout() {
-  if (!sb) return;
-  await sb.auth.signOut();
+  // Clear local state immediately so UI updates even if Supabase hangs
+  currentUser = null;
+  updateAuthUI();
+  render();
+  if (sb) {
+    try { sb.auth.signOut(); } catch(e) { console.warn('signOut error:', e); }
+  }
 }
 
 function showAuthError(msg) {
