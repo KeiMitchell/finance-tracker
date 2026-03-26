@@ -1944,7 +1944,7 @@ function renderSubs() {
       <div style="display:flex;align-items:center">
         <div style="text-align:right">
           <div class="sub-amount">${formatOriginal(s.amount, cur)}${cycleLabel[s.cycle]}</div>
-          <div class="sub-monthly">${formatJPY(monthly)}/mo</div>
+          <div class="sub-monthly">${formatJPY(monthly)}/mo · ${formatJPY(monthly * 12)}/yr</div>
         </div>
         <button class="sub-delete" onclick="deleteSubscription(${s.id})" title="Delete">&times;</button>
       </div>
