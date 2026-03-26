@@ -608,6 +608,18 @@ function updateCategory(id, newCat) {
   const tx = transactions.find(t => t.id === id);
   if (!tx) return;
   tx.category = newCat;
+  // Learn this merchant → category mapping for future use
+  const descKey = tx.desc.toLowerCase().trim();
+  if (descKey && newCat !== 'Other' && newCat !== 'Other Income') {
+    learnedCategories[descKey] = newCat;
+    saveLearnedCategories();
+    // Also apply to all matching transactions in history
+    transactions.forEach(t => {
+      if (t.desc.toLowerCase().trim() === descKey && t.id !== id) {
+        t.category = newCat;
+      }
+    });
+  }
   saveLocal();
   render();
   if (currentUser) {
@@ -1160,6 +1172,10 @@ async function recategorizeAll() {
   });
 }
 
+// --- Learned merchant mappings (user overrides) ---
+let learnedCategories = JSON.parse(localStorage.getItem('finance_learned_cats') || '{}');
+function saveLearnedCategories() { localStorage.setItem('finance_learned_cats', JSON.stringify(learnedCategories)); }
+
 const LOCAL_CATEGORY_RULES = [
   // --- Business (SaaS, dev tools, coworking, professional services) ---
   [/anthropic|claude\.ai/i, 'Business'],
@@ -1178,6 +1194,7 @@ const LOCAL_CATEGORY_RULES = [
   [/consulting|コンサルティング|税理士|会計士|弁護士|司法書士/i, 'Business'],
   [/印刷|名刺|封筒|printing/i, 'Business'],
   [/conference|カンファレンス|セミナー|summit/i, 'Business'],
+  [/デノオフィスサポ/i, 'Business'],
 
   // --- Subscriptions (personal entertainment/media/apps) ---
   [/spotify|netflix|youtube.*premium|disney\+|hulu|amazon prime|apple music|apple tv|audible/i, 'Subscriptions'],
@@ -1192,13 +1209,18 @@ const LOCAL_CATEGORY_RULES = [
   [/restaurant|レストラン|食堂|居酒屋|焼肉|寿司|すし|ラーメン|そば|うどん|丼|定食|弁当/i, 'Dining Out'],
   [/dining|バー|bar |izakaya|焼鳥|串|鳥|牛|豚|魚|鮨|天ぷら|tempura/i, 'Dining Out'],
   [/マクドナルド|mcdonald|mos burger|モスバーガー|吉野家|松屋|すき家|なか卯|coco壱/i, 'Dining Out'],
-  [/eatune|yukinoshita|bills(?!.*payment)/i, 'Dining Out'],
-  [/ノート\s.*\s.*田/i, 'Dining Out'],
+  [/eatune|yukinoshita|bills(?!.*payment)|issou/i, 'Dining Out'],
+  [/ノート\s|ノート　/i, 'Dining Out'],
+  [/ドリンク|飲食|フード|food|meal|lunch|dinner|breakfast/i, 'Dining Out'],
+  [/ベーカリー|パン|bread|sandwich|サンドイッチ/i, 'Dining Out'],
+  [/ピザ|pizza|ハンバーガー|burger|チキン|chicken/i, 'Dining Out'],
 
   // --- Groceries ---
   [/スーパー|grocery|セイコーマート|ライフ|イオン|西友|成城石井|まいばすけっと|マルエツ|ok\sストア/i, 'Groceries'],
   [/コンビニ|セブン|ファミリーマート|ローソン|ミニストップ|デイリーヤマザキ/i, 'Groceries'],
   [/肉屋|八百屋|魚屋|パン屋|ベーカリー|bakery|market/i, 'Groceries'],
+  [/whole foods|trader joe|target|walmart|costco|safeway|kroger/i, 'Groceries'],
+  [/スマート.*チケット.*イオン/i, 'Groceries'],
 
   // --- Transport ---
   [/suica|pasmo|icoca|jr |metro|railway|鉄道|電車|地下鉄/i, 'Transport'],
@@ -1208,6 +1230,7 @@ const LOCAL_CATEGORY_RULES = [
   [/レンタカー|car rental|times|カーシェア/i, 'Transport'],
   [/ゴーゴー|go go|etcマイレージ|etc |通行料|toll/i, 'Transport'],
   [/citation permits/i, 'Transport'],
+  [/ゴリラ.*バイク|バイク.*レンタル/i, 'Transport'],
 
   // --- Shopping ---
   [/amazon(?!\s*(prime|web|music))|アマゾン(?!.*サービシーズ)/i, 'Shopping'],
@@ -1216,6 +1239,8 @@ const LOCAL_CATEGORY_RULES = [
   [/ヨドバシ|ビックカメラ|ヤマダ電機|ケーズデンキ|electronics/i, 'Shopping'],
   [/ニトリ|ikea|franc franc|家具|furniture/i, 'Shopping'],
   [/don quijote|ドン・キホーテ|ドンキ|loft|ハンズ|東急ハンズ/i, 'Shopping'],
+  [/ドラッグストア|drugstore|マツキヨ|サンドラッグ|ツルハ|スギ薬局|コクミン/i, 'Shopping'],
+  [/靴|shoes|衣料|clothing|アパレル|apparel/i, 'Shopping'],
 
   // --- Entertainment ---
   [/cinema|映画|toho|ユナイテッド|movie|theatre|theater|劇場/i, 'Entertainment'],
@@ -1224,6 +1249,7 @@ const LOCAL_CATEGORY_RULES = [
   [/カラオケ|karaoke|ボウリング|bowling|ゴルフ|golf|テニス|tennis/i, 'Entertainment'],
   [/遊園地|テーマパーク|水族館|動物園|美術館|博物館|museum/i, 'Entertainment'],
   [/manga|漫画|書店|本屋|bookstore|kindle|books/i, 'Entertainment'],
+  [/fgt\*|ticketmaster|eventbrite|ライブネーション/i, 'Entertainment'],
 
   // --- Health ---
   [/clinic|クリニック|hospital|病院|pharmacy|薬局|マツモトキヨシ|ウエルシア/i, 'Health'],
@@ -1231,10 +1257,12 @@ const LOCAL_CATEGORY_RULES = [
   [/gym|fitness|yoga|pilates|ジム|フィットネス|パーソナル|トレーニング/i, 'Health'],
   [/サプリ|supplement|vitamin|プロテイン|protein/i, 'Health'],
   [/美容院|美容室|hair|ヘア|barber|理容|理髪/i, 'Health'],
+  [/コンタクト|contact.*lens|メガネ|眼鏡|optical/i, 'Health'],
 
   // --- Travel ---
   [/hotel|ホテル|booking\.com|airbnb|agoda|expedia|じゃらん|一休/i, 'Travel'],
   [/旅行|travel|旅館|ryokan|民宿|ゲストハウス|hostel/i, 'Travel'],
+  [/ドリア|キホーテ.*ホテル|ホテル.*ドリア/i, 'Travel'],
 
   // --- Education ---
   [/school|university|大学|学校|udemy|coursera|skillshare|学費|tuition/i, 'Education'],
@@ -1247,6 +1275,7 @@ const LOCAL_CATEGORY_RULES = [
 
   // --- Rent/Housing ---
   [/rent|家賃|管理費|housing|不動産|賃貸|共益費/i, 'Rent/Housing'],
+  [/厚生|housing.*corp|公社|都市再生/i, 'Rent/Housing'],
 
   // --- Insurance ---
   [/insurance|保険|損保|生保|hoken/i, 'Insurance'],
@@ -1264,8 +1293,24 @@ const LOCAL_CATEGORY_RULES = [
 ];
 
 function categorizeLocal(item) {
+  // 1. Check user-learned mappings first (highest priority)
+  const descKey = item.desc.toLowerCase().trim();
+  if (learnedCategories[descKey]) return learnedCategories[descKey];
+  // Also check partial matches from learned — if any learned key is a substring
+  for (const [learned, cat] of Object.entries(learnedCategories)) {
+    if (descKey.includes(learned) || learned.includes(descKey)) return cat;
+  }
+  // 2. Check amount-based heuristics for known patterns
+  const amt = item.amount;
+  const cur = item.currency || 'JPY';
+  // 3. Static regex rules
   for (const [regex, cat] of LOCAL_CATEGORY_RULES) {
     if (regex.test(item.desc)) return cat;
+  }
+  // 4. Smart amount-based guessing for JPY transactions with garbled text
+  if (cur === 'JPY' && !item.desc.match(/[a-zA-Z]{3,}/)) {
+    if (amt >= 50000 && amt <= 200000) return 'Rent/Housing';
+    if (amt < 0) return 'Refund';
   }
   return null;
 }
@@ -1290,21 +1335,41 @@ async function categorizeWithGemini(items) {
   const incCats = INCOME_CATEGORIES.join(', ');
   const descs = needsAI.map((e, i) => `${i}. [${e.item.type}] ${e.item.desc} (${e.item.currency} ${e.item.amount})`).join('\n');
 
-  const prompt = `You are categorizing credit card transactions from Japan. Many descriptions are Japanese merchant names followed by a location (city/prefecture).
+  // Include user's learned mappings as examples for Gemini
+  const learnedExamples = Object.entries(learnedCategories).slice(0, 20)
+    .map(([desc, cat]) => `"${desc}" → ${cat}`).join('\n');
 
-Rules:
-- Expense categories: ${expCats}
-- Income categories: ${incCats}
-- "Business" = SaaS tools, dev tools, cloud services, coworking, professional services, business software, advertising
-- "Fees" = card fees, interest charges, annual fees, ATM fees
-- If the description contains a Japanese place name with 市/区/県/町, it's likely a physical store — reason about what kind of store it is from the merchant name
-- If the description is garbled/unreadable but has a location, use the amount to guess (small ¥200-2000 = likely dining/groceries, large = could be shopping/travel)
-- A negative amount means refund/credit
+  const prompt = `You are an expert at categorizing credit card and bank transactions for a bilingual (JP/US) user.
 
-For each transaction, think about what the merchant likely is, then categorize.
+CATEGORIES:
+Expense: ${expCats}
+Income: ${incCats}
 
-Reply with a JSON array only: [{"c":"CategoryName","ok":true/false},...]
-Set "ok":false only if you truly cannot determine the category.
+CRITICAL RULES:
+1. Japanese AMEX descriptions are often Shift-JIS encoded and may appear garbled. Look for partial readable text, amounts, and patterns.
+2. Format: "MerchantName　Location" — the location part (市/区/県/町/神奈川/東京/大阪 etc.) confirms it's a physical store in Japan.
+3. Business = SaaS, dev tools, cloud, coworking, APIs, advertising platforms, professional services
+4. Fees = card annual fees, interest (ペイフレックス), bank fees, ATM fees
+5. Credit Card Payment = 口座振替 (bank auto-debit for CC bill)
+6. Negative amounts = Refund
+7. Use amount as a strong signal:
+   - JPY 200-2,000: likely Dining Out or Groceries
+   - JPY 2,000-10,000: could be Shopping, Dining, Transport, or Health
+   - JPY 10,000-50,000: Shopping, Travel, Business, or Entertainment
+   - JPY 50,000+: Rent/Housing, Travel, or large Shopping
+   - USD < $20: Subscriptions or Dining
+   - USD $20-100: Shopping, Entertainment, or Business
+   - USD $100+: Business, Travel, or large purchase
+
+${learnedExamples ? `USER'S KNOWN MAPPINGS (use these as reference):\n${learnedExamples}\n` : ''}
+THINKING PROCESS for each transaction:
+1. Read the description — identify any readable Japanese/English words
+2. Check if it matches a known merchant type
+3. Consider the amount and currency
+4. Assign the most likely category
+
+Reply ONLY with a JSON array: [{"c":"CategoryName","ok":true},...]
+Set "ok":false ONLY if completely unidentifiable. Be decisive — make your best guess even for garbled text.
 
 Transactions:
 ${descs}`;
