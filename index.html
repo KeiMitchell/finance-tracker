@@ -221,6 +221,15 @@
   .budget-delete:hover { color: #f85149; }
   .budget-summary { margin-top: 12px; padding: 12px 16px; background: #1a1a0e; border: 1px solid #3d3d1e; border-radius: 10px; display: flex; justify-content: space-between; align-items: center; }
   .card-value.budget { color: #e3b341; }
+
+  /* Page Navigation */
+  .page-nav { display: flex; gap: 2px; background: #0d1117; border-radius: 12px; padding: 4px; margin-bottom: 20px; border: 1px solid #21262d; }
+  .page-nav-btn { flex: 1; padding: 10px 16px; border: none; border-radius: 10px; cursor: pointer; font-size: 14px; font-weight: 600; color: #8b949e; background: transparent; transition: all 0.25s; display: flex; align-items: center; justify-content: center; gap: 6px; }
+  .page-nav-btn:hover { color: #c9d1d9; background: #161b22; }
+  .page-nav-btn.active { color: #fff; background: #161b22; box-shadow: 0 1px 4px rgba(0,0,0,0.3); }
+  .page-nav-btn .nav-icon { font-size: 16px; }
+  .page { display: none; }
+  .page.active { display: block; }
 </style>
 </head>
 <body>
@@ -250,17 +259,45 @@
     <span class="rate-hint">All summaries & charts shown in JPY</span>
   </div>
 
-  <div class="region-toggle" id="regionToggle">
-    <button class="region-btn active" onclick="setRegion('all')"><span class="flag">All</span></button>
-    <button class="region-btn" onclick="setRegion('jp')"><span class="flag">JP</span></button>
-    <button class="region-btn" onclick="setRegion('us')"><span class="flag">US</span></button>
+  <div class="page-nav">
+    <button class="page-nav-btn active" onclick="showPage('dashboard')"><span class="nav-icon">dashboard</span> Dashboard</button>
+    <button class="page-nav-btn" onclick="showPage('transactions')"><span class="nav-icon">receipt</span> Transactions</button>
+    <button class="page-nav-btn" onclick="showPage('manage')"><span class="nav-icon">settings</span> Manage</button>
   </div>
 
-  <div id="regionSummary"></div>
-  <div class="summary" id="summary"></div>
-  <div id="insights" style="margin-bottom:24px;"></div>
+  <!-- PAGE: Dashboard -->
+  <div class="page active" id="page-dashboard">
+    <div class="region-toggle" id="regionToggle">
+      <button class="region-btn active" onclick="setRegion('all')"><span class="flag">All</span></button>
+      <button class="region-btn" onclick="setRegion('jp')"><span class="flag">JP</span></button>
+      <button class="region-btn" onclick="setRegion('us')"><span class="flag">US</span></button>
+    </div>
 
-  <div class="main-grid">
+    <div id="regionSummary"></div>
+    <div class="summary" id="summary"></div>
+    <div id="insights" style="margin-bottom:24px;"></div>
+
+    <div class="charts-section" style="margin-bottom:24px;">
+      <div class="chart-card">
+        <h2>Monthly Cash Flow</h2>
+        <canvas id="cashflowChart"></canvas>
+      </div>
+      <div class="chart-row">
+        <div class="chart-card">
+          <h2>Spending by Category</h2>
+          <canvas id="categoryChart"></canvas>
+        </div>
+        <div class="chart-card">
+          <h2>Income vs Expenses</h2>
+          <canvas id="pieChart"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PAGE: Transactions -->
+  <div class="page" id="page-transactions">
+    <div class="main-grid" style="grid-template-columns:360px 1fr;">
     <div class="form-section">
       <h2>Add Transaction</h2>
       <div class="tab-bar">
@@ -291,26 +328,8 @@
       </div>
       <button class="btn-add income" id="btnAdd" onclick="addTransaction()">+ Add Income</button>
     </div>
-
-    <div class="charts-section">
-      <div class="chart-card">
-        <h2>Monthly Cash Flow</h2>
-        <canvas id="cashflowChart"></canvas>
-      </div>
-      <div class="chart-row">
-        <div class="chart-card">
-          <h2>Spending by Category</h2>
-          <canvas id="categoryChart"></canvas>
-        </div>
-        <div class="chart-card">
-          <h2>Income vs Expenses</h2>
-          <canvas id="pieChart"></canvas>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="transactions">
+    <div style="display:flex;flex-direction:column;gap:20px;">
+  <div class="transactions" style="margin-top:0;">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
       <h2 style="margin:0">Transactions</h2>
       <div class="filter-bar" style="margin:0; display:flex; gap:8px; align-items:center;">
@@ -324,51 +343,6 @@
       </div>
     </div>
     <div class="tx-list" id="txList"></div>
-  </div>
-
-  <div class="sub-section">
-    <h2>Subscriptions</h2>
-    <div class="sub-form">
-      <input type="text" id="subName" placeholder="Service name (e.g. Netflix)">
-      <input type="number" id="subAmount" placeholder="Amount" min="0" step="0.01">
-      <select id="subCurrency"><option value="JPY">JPY</option><option value="USD">USD</option></select>
-      <select id="subCycle">
-        <option value="monthly">Monthly</option>
-        <option value="yearly">Yearly</option>
-        <option value="weekly">Weekly</option>
-      </select>
-      <select id="subCategory">
-        <option value="Streaming">Streaming</option>
-        <option value="Music">Music</option>
-        <option value="Cloud Storage">Cloud Storage</option>
-        <option value="Software">Software</option>
-        <option value="Gaming">Gaming</option>
-        <option value="News/Media">News/Media</option>
-        <option value="Fitness">Fitness</option>
-        <option value="Insurance">Insurance</option>
-        <option value="Phone/Internet">Phone/Internet</option>
-        <option value="Other">Other</option>
-      </select>
-      <input type="date" id="subNextDate">
-      <button class="btn-add-sub" onclick="addSubscription()">+ Add</button>
-      <button class="btn-add-sub" onclick="autoDetectSubscriptions()" style="background:#1f6feb;">Auto-detect from history</button>
-    </div>
-    <div id="subDetected" style="display:none;"></div>
-    <div class="sub-list" id="subList"></div>
-    <div class="sub-total" id="subTotal"></div>
-  </div>
-
-  <div class="budget-section">
-    <h2>Monthly Budgets</h2>
-    <div class="budget-form">
-      <select id="budgetCategory">
-        <option value="">Select category...</option>
-      </select>
-      <input type="number" id="budgetAmount" placeholder="Budget (JPY)" min="0" step="100">
-      <button class="btn-add-budget" onclick="addBudget()">Set Budget</button>
-    </div>
-    <div class="budget-list" id="budgetList"></div>
-    <div class="budget-summary" id="budgetSummary"></div>
   </div>
 
   <div class="import-section">
@@ -397,6 +371,57 @@
     <div id="importPreview"></div>
     <div id="importResult"></div>
   </div>
+    </div><!-- right col -->
+    </div><!-- main-grid -->
+  </div><!-- page-transactions -->
+
+  <!-- PAGE: Manage -->
+  <div class="page" id="page-manage">
+    <div class="sub-section">
+      <h2>Subscriptions</h2>
+      <div class="sub-form">
+        <input type="text" id="subName" placeholder="Service name (e.g. Netflix)">
+        <input type="number" id="subAmount" placeholder="Amount" min="0" step="0.01">
+        <select id="subCurrency"><option value="JPY">JPY</option><option value="USD">USD</option></select>
+        <select id="subCycle">
+          <option value="monthly">Monthly</option>
+          <option value="yearly">Yearly</option>
+          <option value="weekly">Weekly</option>
+        </select>
+        <select id="subCategory">
+          <option value="Streaming">Streaming</option>
+          <option value="Music">Music</option>
+          <option value="Cloud Storage">Cloud Storage</option>
+          <option value="Software">Software</option>
+          <option value="Gaming">Gaming</option>
+          <option value="News/Media">News/Media</option>
+          <option value="Fitness">Fitness</option>
+          <option value="Insurance">Insurance</option>
+          <option value="Phone/Internet">Phone/Internet</option>
+          <option value="Other">Other</option>
+        </select>
+        <input type="date" id="subNextDate">
+        <button class="btn-add-sub" onclick="addSubscription()">+ Add</button>
+        <button class="btn-add-sub" onclick="autoDetectSubscriptions()" style="background:#1f6feb;">Auto-detect from history</button>
+      </div>
+      <div id="subDetected" style="display:none;"></div>
+      <div class="sub-list" id="subList"></div>
+      <div class="sub-total" id="subTotal"></div>
+    </div>
+
+    <div class="budget-section">
+      <h2>Monthly Budgets</h2>
+      <div class="budget-form">
+        <select id="budgetCategory">
+          <option value="">Select category...</option>
+        </select>
+        <input type="number" id="budgetAmount" placeholder="Budget (JPY)" min="0" step="100">
+        <button class="btn-add-budget" onclick="addBudget()">Set Budget</button>
+      </div>
+      <div class="budget-list" id="budgetList"></div>
+      <div class="budget-summary" id="budgetSummary"></div>
+    </div>
+  </div><!-- page-manage -->
 </div>
 
 <script>
@@ -489,6 +514,17 @@ let transactions = JSON.parse(localStorage.getItem('finance_tx') || '[]');
 let currentType = 'income';
 let viewDate = new Date();
 let currentRegion = 'all'; // 'all', 'jp', 'us'
+let currentPage = 'dashboard';
+
+function showPage(page) {
+  currentPage = page;
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.page-nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + page).classList.add('active');
+  document.querySelector(`.page-nav-btn[onclick="showPage('${page}')"]`).classList.add('active');
+  // Re-render charts when switching to dashboard (canvas needs to be visible)
+  if (page === 'dashboard') render();
+}
 
 function setRegion(region) {
   currentRegion = region;
